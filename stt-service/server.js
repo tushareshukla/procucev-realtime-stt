@@ -173,7 +173,8 @@ app.post('/transcribe', async (req, res) => {
     let sum = 0;
     const n = pcm.length / 2;
     for (let i = 0; i < n; i++) { const v = pcm.readInt16LE(i * 2) / 32768; sum += v * v; }
-    if (Math.sqrt(sum / n) < SILENCE_RMS) {
+    const level = Math.sqrt(sum / n);
+    if (level < SILENCE_RMS) {
       return res.json({ text: '', language, confidence: 0, skipped: 'silence' });
     }
 
