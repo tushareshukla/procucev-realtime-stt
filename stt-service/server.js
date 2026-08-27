@@ -119,8 +119,19 @@ async function transcribeWhisper(pcm, language) {
 const app = express();
 app.use('/transcribe', express.raw({ type: '*/*', limit: '25mb' }));
 
-app.get('/healthz', (_req, res) =>
-  res.json({ ok: true, engine: ENGINE, model: ENGINE === 'chirp' ? SPEECH_MODEL : (process.env.WHISPER_MODEL ?? 'Xenova/whisper-small'), location: SPEECH_LOCATION }));
+// GET is answered too, but some network paths in front of Cloud Run drop GET
+// while passing POST, so health must be reachable either way.
+const statusPayload = () => ({
+  ok: true,
+  engine: ENGINE,
+  model: ENGINE === 'chirp' ? SPEECH_MODEL : (process.env.WHISPER_MODEL ?? 'Xenova/whisper-small'),
+  location: SPEECH_LOCATION,
+});
+
+// `/healthz` is intercepted by infrastructure in front of Cloud Run on some
+// network paths, so the same payload is served from `/status`, and a tiny
+// `/transcribe` body doubles as a liveness probe.
+app.all(['/healthz', '/status'], (_req, res) => res.json(statusPayload()));
 
 app.post('/transcribe', async (req, res) => {
   const started = Date.now();
@@ -129,7 +140,9 @@ app.post('/transcribe', async (req, res) => {
 
   try {
     if (!pcm?.length || pcm.length < SAMPLE_RATE * MIN_SECONDS * 2) {
-      return res.json({ text: '', language, confidence: 0, skipped: 'too-short' });
+      // Doubles as a liveness probe: echoes engine/model so a caller can
+      // verify configuration without a separate reachable endpoint.
+      return res.json({ text: '', language, confidence: 0, skipped: 'too-short', ...statusPayload() });
     }
 
     // Both engines invent words from digital silence. Gate before spending a call.

@@ -32,6 +32,7 @@ export class SttService implements OnModuleInit {
     // This also warms the Cloud Run instance ahead of the first speaker.
     try {
       const res = await fetch(`${STT_SERVICE_URL}/healthz`, {
+        method: 'POST',
         signal: AbortSignal.timeout(10_000),
       });
       const body = await res.json();
@@ -46,11 +47,20 @@ export class SttService implements OnModuleInit {
     return this.reachable;
   }
 
-  /** Live upstream check, used by /readyz. */
+  /**
+   * Live upstream check. Uses POST /transcribe with a 2-byte body rather than
+   * a health path: infrastructure in front of Cloud Run intercepts /healthz on
+   * some network paths, and this exercises the real code path anyway.
+   */
   async health(): Promise<{ reachable: boolean; url: string; engine?: string; model?: string }> {
     if (!STT_SERVICE_URL) return { reachable: false, url: '' };
     try {
-      const res = await fetch(`${STT_SERVICE_URL}/healthz`, { signal: AbortSignal.timeout(8_000) });
+      const res = await fetch(`${STT_SERVICE_URL}/transcribe?language=en`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: Buffer.alloc(2),
+        signal: AbortSignal.timeout(10_000),
+      });
       const body = await res.json().catch(() => ({}));
       this.reachable = res.ok;
       return { reachable: res.ok, url: STT_SERVICE_URL, engine: body?.engine, model: body?.model };
@@ -59,6 +69,7 @@ export class SttService implements OnModuleInit {
       return { reachable: false, url: STT_SERVICE_URL };
     }
   }
+
 
   /**
    * Send a mono 16 kHz window for transcription.
