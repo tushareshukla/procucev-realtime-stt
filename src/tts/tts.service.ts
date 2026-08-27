@@ -1,4 +1,5 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { Readable } from 'node:stream';
 
 const STT_SERVICE_URL = (process.env.STT_SERVICE_URL ?? '').replace(/\/$/, '');
 const TIMEOUT_MS = Number(process.env.TTS_TIMEOUT_MS ?? 60_000);
@@ -62,7 +63,9 @@ export class TtsService {
       const detail = await res.text().catch(() => '');
       throw new ServiceUnavailableException(`tts stream failed: ${res.status} ${detail.slice(0, 200)}`);
     }
-    return res.body as unknown as NodeJS.ReadableStream;
+    // fetch() yields a Web ReadableStream, which has no .pipe(); Express needs
+    // a Node stream. Readable.fromWeb bridges the two without buffering.
+    return Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]);
   }
 
   async speak(body: {
