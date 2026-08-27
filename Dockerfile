@@ -23,14 +23,10 @@ COPY --from=build /srv/node_modules ./node_modules
 COPY --from=build /srv/dist ./dist
 COPY package.json ./
 COPY public ./public
-# Cloudflare caches /app.js at the edge for hours, so a deploy alone does not
-# reach browsers — they keep running the previous build, which looks like the
-# new code is broken. Stamping a per-build version into the asset URLs means a
-# release always fetches a URL that was never cached.
-ARG BUILD_ID=dev
-RUN find ./public -type f \( -name '*.html' -o -name '*.js' \) \
-      -exec sed -i "s/__BUILD__/${BUILD_ID}/g" {} + \
- && echo "stamped build ${BUILD_ID}"
+# The __BUILD__ placeholder is deliberately left in the image and stamped at
+# container start instead. Stamping it here bakes one value into the layer, so
+# a rebuild can reuse it and keep pointing browsers at a cached asset URL —
+# which is how a fixed build kept getting shadowed by a broken cached one.
 
 # No model weights and no ONNX runtime here — Whisper lives in the separate
 # Cloud Run service reached via STT_SERVICE_URL.

@@ -13,6 +13,7 @@ import { join } from 'node:path';
 @Controller()
 export class IndexController {
   private readonly buildId = process.env.BUILD_ID || String(Date.now());
+
   private readonly indexPath = join(__dirname, '..', 'public', 'index.html');
 
   @Get('app.js')
