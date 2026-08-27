@@ -5,355 +5,233 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Speech to Text</title>
 <style>
-  :root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--fg:#e6e9ef;--mut:#8b93a7;--acc:#5b8cff;--red:#ff5b6e}
+  :root{
+    --bg:#0b0d12; --panel:#12151c; --panel2:#171b24; --line:#232936;
+    --fg:#e8ebf2; --mut:#8b93a7; --dim:#5d6577;
+    --acc:#5b8cff; --acc2:#7aa2ff; --red:#ff5b6e; --grn:#3ecf8e;
+    --r:14px;
+  }
   *{box-sizing:border-box}
-  body{margin:0;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--fg)}
-  header{padding:20px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  h1{font-size:17px;margin:0;font-weight:600;letter-spacing:-.01em}
-  .sp{flex:1}
-  button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:9px 16px;border-radius:8px;cursor:pointer}
-  button:hover{border-color:#394152}
-  button.rec{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
-  button.rec.on{background:var(--red);border-color:var(--red)}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  select{font:inherit;background:var(--panel);color:var(--fg);border:1px solid var(--line);padding:9px 12px;border-radius:8px}
-  main{padding:24px;max-width:1020px;margin:0 auto}
-  .live{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;min-height:104px;margin-bottom:24px}
-  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--mut);margin-bottom:10px}
-  .partial{font-size:19px;line-height:1.5;min-height:29px}
-  .partial:empty::after{content:"Press Record and speak — Hindi, English, or a mix of both.";color:var(--mut);font-size:15px}
-  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red);margin-right:8px;vertical-align:middle;opacity:.3}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
-  .dot.on{animation:pulse 1.1s infinite;opacity:1}
-  table{width:100%;border-collapse:collapse}
-  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--mut);font-weight:500;padding:0 10px 10px}
-  td{padding:12px 10px;border-top:1px solid var(--line);vertical-align:top}
-  td.txt{width:100%}
-  .meta{color:var(--mut);font-size:12px;white-space:nowrap}
-  .tag{display:inline-block;padding:2px 7px;border:1px solid var(--line);border-radius:5px;font-size:11px;color:var(--mut)}
-  .act button{padding:5px 10px;font-size:12px;margin-left:6px}
-  .empty{color:var(--mut);text-align:center;padding:32px}
-  [contenteditable]{outline:none;border-radius:5px;padding:2px 4px}
-  [contenteditable]:focus{box-shadow:0 0 0 2px var(--acc)}
-  #agent{margin-top:26px;padding-top:20px;border-top:1px solid var(--line)}
-  #agentOut{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:12px;white-space:pre-wrap;color:var(--mut)}
-  #agentOut:empty{display:none}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
+       -webkit-font-smoothing:antialiased}
 
-  /* ── Agent widget ───────────────────────────────────────────────────── */
-  #fab{position:fixed;right:24px;bottom:24px;width:52px;height:52px;border-radius:50%;
+  /* ── top bar ─────────────────────────────────────────────────────────── */
+  header{display:flex;align-items:center;gap:12px;padding:16px 22px;
+         border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;
+         background:rgba(11,13,18,.85);backdrop-filter:blur(12px)}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.015em}
+  .brand svg{width:19px;height:19px;color:var(--acc)}
+  .sp{flex:1}
+  .chip{display:inline-flex;align-items:center;gap:7px;background:var(--panel2);
+        border:1px solid var(--line);border-radius:999px;padding:7px 13px;font-size:13px;color:var(--fg)}
+  .chip select{background:none;border:none;color:inherit;font:inherit;outline:none;cursor:pointer}
+  .chip select option{background:var(--panel2)}
+  .ghost{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+         border-radius:9px;padding:8px 14px;font:inherit;font-size:13.5px;cursor:pointer}
+  .ghost:hover{border-color:#333c4e}
+  .ghost:disabled{opacity:.4;cursor:not-allowed}
+
+  main{max-width:940px;margin:0 auto;padding:28px 22px 80px}
+
+  /* ── recorder card ───────────────────────────────────────────────────── */
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+         overflow:hidden;margin-bottom:30px}
+  .wave{height:62px;display:block;width:100%;background:var(--panel2)}
+  .stage-body{padding:24px 24px 20px}
+  .status{display:flex;align-items:center;gap:9px;font-size:11.5px;text-transform:uppercase;
+          letter-spacing:.1em;color:var(--mut);margin-bottom:14px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+  .dot.live{background:var(--red);animation:pulse 1.2s infinite}
+  .dot.speech{background:var(--grn);animation:none}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  .timer{margin-left:auto;font-variant-numeric:tabular-nums;letter-spacing:.04em;color:var(--dim)}
+  .live-text{font-size:20px;line-height:1.6;min-height:64px;font-weight:400}
+  .live-text .ph{color:var(--dim);font-size:15px}
+  .controls{display:flex;align-items:center;gap:12px;margin-top:22px;
+            padding-top:18px;border-top:1px solid var(--line)}
+  .rec{display:inline-flex;align-items:center;gap:9px;background:var(--acc);border:none;
+       color:#fff;font:inherit;font-weight:600;font-size:14.5px;padding:11px 22px;
+       border-radius:999px;cursor:pointer;transition:transform .12s,background .12s}
+  .rec:hover{transform:translateY(-1px)}
+  .rec.on{background:var(--red)}
+  .rec .ico{width:10px;height:10px;border-radius:50%;background:#fff}
+  .rec.on .ico{border-radius:2px}
+
+  /* ── history ─────────────────────────────────────────────────────────── */
+  .sec{display:flex;align-items:center;gap:10px;margin:0 0 14px}
+  .sec h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);
+          font-weight:500;margin:0}
+  .count{background:var(--panel2);border:1px solid var(--line);border-radius:6px;
+         padding:1px 7px;font-size:11px;color:var(--mut)}
+  .row{display:flex;gap:14px;padding:16px 0;border-top:1px solid var(--line)}
+  .row-main{flex:1;min-width:0}
+  .row-text{font-size:15.5px;line-height:1.6;outline:none;border-radius:6px;padding:3px 5px;margin:-3px -5px}
+  .row-text:focus{box-shadow:0 0 0 2px var(--acc)}
+  .row-meta{display:flex;gap:14px;margin-top:8px;font-size:11.5px;color:var(--dim)}
+  .row-acts{display:flex;align-items:flex-start;gap:4px;flex-shrink:0}
+  .ibtn{background:none;border:1px solid transparent;color:var(--mut);cursor:pointer;
+        border-radius:8px;padding:7px 9px;font-size:13px;line-height:1;transition:.12s}
+  .ibtn:hover{background:var(--panel2);border-color:var(--line);color:var(--fg)}
+  .ibtn.play.on{color:var(--grn);background:var(--panel2);border-color:var(--line)}
+  .ibtn.danger:hover{color:var(--red)}
+  .empty{text-align:center;color:var(--dim);padding:44px 0;font-size:14px}
+
+  /* ── voice / tone panel ──────────────────────────────────────────────── */
+  .voice{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+         padding:18px 20px;margin-top:26px}
+  .voice.hidden{display:none}
+  .vhead{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+  .vhead h3{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);
+            font-weight:500;margin:0}
+  .vhead .caret{margin-left:auto;color:var(--dim);transition:transform .18s}
+  .voice.open .caret{transform:rotate(180deg)}
+  .vbody{display:none;gap:18px;margin-top:18px;flex-wrap:wrap}
+  .voice.open .vbody{display:flex}
+  .field{display:flex;flex-direction:column;gap:7px;min-width:180px;flex:1}
+  .field label{font-size:11.5px;color:var(--mut);display:flex;justify-content:space-between}
+  .field select,.field input[type=range]{width:100%}
+  .field select{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+                border-radius:8px;padding:8px 10px;font:inherit;font-size:13.5px;outline:none}
+  input[type=range]{-webkit-appearance:none;height:4px;border-radius:2px;background:var(--line);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+    border-radius:50%;background:var(--acc);cursor:pointer;border:2px solid var(--panel)}
+  .vnote{width:100%;font-size:11.5px;color:var(--dim);margin-top:4px}
+
+  /* ── agent widget ────────────────────────────────────────────────────── */
+  #fab{position:fixed;right:24px;bottom:24px;width:50px;height:50px;border-radius:50%;
        display:grid;place-items:center;background:var(--acc);border:none;color:#fff;
-       font-size:20px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:60;transition:transform .18s}
-  #fab:hover{transform:scale(1.06)}
+       font-size:19px;box-shadow:0 10px 30px rgba(0,0,0,.5);cursor:pointer;z-index:60}
   #fab.hidden{display:none}
   #widget{position:fixed;right:24px;bottom:24px;width:390px;max-width:calc(100vw - 32px);
-          height:560px;max-height:calc(100vh - 48px);background:var(--panel);
-          border:1px solid var(--line);border-radius:14px;display:none;flex-direction:column;
-          box-shadow:0 20px 50px rgba(0,0,0,.5);z-index:61;overflow:hidden}
+          height:540px;max-height:calc(100vh - 48px);background:var(--panel);
+          border:1px solid var(--line);border-radius:var(--r);display:none;flex-direction:column;
+          box-shadow:0 22px 55px rgba(0,0,0,.6);z-index:61;overflow:hidden}
   #widget.open{display:flex}
-  #widget.min{height:52px}
-  #widget.min .wbody,#widget.min .wfoot{display:none}
-  .whead{display:flex;align-items:center;gap:8px;padding:14px 14px;border-bottom:1px solid var(--line);flex:0 0 auto}
-  .whead .t{font-size:13px;font-weight:600;letter-spacing:-.01em}
-  .whead .sp{flex:1}
-  .icon{background:none;border:none;color:var(--mut);cursor:pointer;padding:4px 6px;border-radius:6px;font-size:14px;line-height:1}
-  .icon:hover{background:#20242e;color:var(--fg)}
-  .wbody{flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:16px}
-  .msg.u{align-self:flex-end;max-width:85%;background:var(--acc);color:#fff;padding:9px 13px;border-radius:14px 14px 4px 14px;font-size:14px}
+  .whead{display:flex;align-items:center;gap:8px;padding:14px;border-bottom:1px solid var(--line)}
+  .whead .t{font-size:13px;font-weight:600}
+  .wbody{flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:15px}
+  .msg.u{align-self:flex-end;max-width:85%;background:var(--acc);color:#fff;padding:9px 13px;
+         border-radius:14px 14px 4px 14px;font-size:14px}
   .msg.a{align-self:stretch;font-size:14px;line-height:1.6;white-space:pre-wrap}
-  .thought{font-size:11px;color:var(--mut);margin-bottom:7px}
-  .arow{display:flex;gap:2px;margin-top:8px}
-  .arow button{background:none;border:none;color:var(--mut);cursor:pointer;padding:4px 6px;border-radius:5px;font-size:12px}
-  .arow button:hover{background:#20242e;color:var(--fg)}
+  .thought{font-size:11px;color:var(--dim);margin-bottom:6px}
   .chips{display:flex;flex-wrap:wrap;gap:7px}
-  .chip{background:#1d212a;border:1px solid var(--line);color:var(--fg);padding:7px 12px;
-        border-radius:999px;font-size:12.5px;cursor:pointer}
-  .chip:hover{border-color:var(--acc)}
-  .wfoot{flex:0 0 auto;border-top:1px solid var(--line);padding:11px 12px}
-  .inrow{display:flex;align-items:flex-end;gap:8px;background:#1d212a;border:1px solid var(--line);
-         border-radius:10px;padding:8px 10px}
+  .qchip{background:var(--panel2);border:1px solid var(--line);color:var(--fg);padding:7px 12px;
+         border-radius:999px;font-size:12.5px;cursor:pointer}
+  .qchip:hover{border-color:var(--acc)}
+  .wfoot{border-top:1px solid var(--line);padding:11px 12px}
+  .inrow{display:flex;align-items:flex-end;gap:8px;background:var(--panel2);
+         border:1px solid var(--line);border-radius:10px;padding:8px 10px}
   .inrow:focus-within{border-color:var(--acc)}
-  #ain{flex:1;background:none;border:none;color:var(--fg);font:inherit;font-size:14px;resize:none;
-       outline:none;max-height:96px;line-height:1.45}
-  #asend{background:var(--acc);border:none;color:#fff;width:29px;height:29px;border-radius:7px;
-         cursor:pointer;font-size:14px;flex:0 0 auto}
-  #asend:disabled{opacity:.35;cursor:not-allowed}
-  .disc{font-size:10.5px;color:var(--mut);text-align:center;margin-top:8px}
+  #ain{flex:1;background:none;border:none;color:var(--fg);font:inherit;font-size:14px;
+       resize:none;outline:none;max-height:96px}
+  #asend{background:var(--acc);border:none;color:#fff;width:28px;height:28px;border-radius:7px;cursor:pointer}
+  .disc{font-size:10.5px;color:var(--dim);text-align:center;margin-top:8px}
   .off{color:var(--mut);font-size:13px;line-height:1.6}
-  .off code{background:#1d212a;padding:1px 5px;border-radius:4px;font-size:12px}
+  .off code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
+  .arow{display:flex;gap:2px;margin-top:8px}
+  .arow button{background:none;border:none;color:var(--mut);cursor:pointer;padding:4px 6px;
+               border-radius:5px;font-size:12px}
+  .arow button:hover{background:var(--panel2);color:var(--fg)}
 </style>
 </head>
 <body>
+
 <header>
-  <h1>Real-time Multilingual Speech to Text</h1>
-  <span class="tag" id="stat">idle</span>
+  <span class="brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M12 2v20M6 7v10M18 7v10M2 11v2M22 11v2"/>
+    </svg>
+    Speech to Text
+  </span>
+  <span class="chip">
+    <span style="color:var(--mut);font-size:12px">Language</span>
+    <select id="lang">
+      <option value="en" selected>English</option>
+      <option value="hi">Hindi / Hinglish</option>
+      <option value="bn">Bengali</option>
+      <option value="ta">Tamil</option>
+      <option value="te">Telugu</option>
+      <option value="mr">Marathi</option>
+      <option value="gu">Gujarati</option>
+      <option value="ur">Urdu</option>
+      <option value="es">Spanish</option>
+      <option value="fr">French</option>
+      <option value="de">German</option>
+      <option value="zh">Chinese</option>
+      <option value="ja">Japanese</option>
+      <option value="ar">Arabic</option>
+    </select>
+  </span>
   <span class="sp"></span>
-  <select id="lang" title="Whisper needs an explicit language; Hindi mode keeps Hinglish code-mixing intact">
-    <option value="hi" selected>Hindi / Hinglish</option>
-    <option value="en">English</option>
-    <option value="bn">Bengali</option>
-    <option value="ta">Tamil</option>
-    <option value="te">Telugu</option>
-    <option value="mr">Marathi</option>
-    <option value="gu">Gujarati</option>
-    <option value="ur">Urdu</option>
-    <option value="es">Spanish</option>
-    <option value="fr">French</option>
-    <option value="de">German</option>
-    <option value="zh">Chinese</option>
-    <option value="ja">Japanese</option>
-    <option value="ar">Arabic</option>
-  </select>
-  <button id="rec" class="rec">● Record</button>
-  <button id="refresh">Refresh</button>
+  <button class="ghost" id="copyAll">Copy transcript</button>
+  <button class="ghost" id="refresh">Refresh</button>
 </header>
 
 <main>
-  <div class="live">
-    <div class="lbl"><span class="dot" id="dot"></span>Live transcript</div>
-    <div class="partial" id="partial"></div>
+  <section class="stage">
+    <canvas class="wave" id="wave"></canvas>
+    <div class="stage-body">
+      <div class="status">
+        <span class="dot" id="dot"></span>
+        <span id="stat">Idle</span>
+        <span class="timer" id="timer">0:00</span>
+      </div>
+      <div class="live-text" id="live"><span class="ph">Press Record and start speaking.</span></div>
+      <div class="controls">
+        <button class="rec" id="rec"><span class="ico"></span><span id="recLabel">Record</span></button>
+        <span style="font-size:12.5px;color:var(--dim)" id="hint">Audio is only sent while you're speaking.</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="sec">
+    <h2>Transcription history</h2>
+    <span class="count" id="count">0</span>
   </div>
+  <div id="rows"></div>
+  <div class="empty" id="empty">Nothing recorded yet.</div>
 
-  <div class="lbl">Transcription history</div>
-  <table>
-    <thead><tr><th>Text</th><th>Lang</th><th>Dur</th><th>When</th><th></th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <div class="empty" id="empty">No transcriptions yet.</div>
-
+  <section class="voice" id="voice">
+    <div class="vhead" id="vhead">
+      <h3>Playback voice &amp; tone</h3>
+      <span class="caret">▾</span>
+    </div>
+    <div class="vbody">
+      <div class="field">
+        <label for="vsel">Voice</label>
+        <select id="vsel"></select>
+      </div>
+      <div class="field">
+        <label for="vrate">Speed <span id="vrateV">1.0×</span></label>
+        <input type="range" id="vrate" min="0.5" max="2" step="0.1" value="1">
+      </div>
+      <div class="field">
+        <label for="vpitch">Pitch <span id="vpitchV">1.0</span></label>
+        <input type="range" id="vpitch" min="0" max="2" step="0.1" value="1">
+      </div>
+      <div class="vnote" id="vnote"></div>
+    </div>
+  </section>
 </main>
 
 <button id="fab" title="Ask the transcript agent">✦</button>
-
 <section id="widget" aria-label="Transcript agent">
   <div class="whead">
-    <span class="t">Transcript agent</span>
-    <span class="sp"></span>
-    <button class="icon" id="wmin" title="Minimise">—</button>
-    <button class="icon" id="wclose" title="Close">✕</button>
+    <span class="t">Transcript agent</span><span class="sp"></span>
+    <button class="ibtn" id="wmin">—</button><button class="ibtn" id="wclose">✕</button>
   </div>
   <div class="wbody" id="wbody"></div>
   <div class="wfoot" id="wfoot">
     <div class="inrow">
       <textarea id="ain" rows="1" placeholder="Ask about your transcripts…"></textarea>
-      <button id="asend" title="Send">↑</button>
+      <button id="asend">↑</button>
     </div>
-    <div class="disc">Whisper and the agent can both make mistakes. Check the transcript.</div>
+    <div class="disc">Whisper and the agent can both make mistakes.</div>
   </div>
 </section>
 
-<script>
-const $ = id => document.getElementById(id);
-let ws, ctx, node, stream, recording = false, sessionId = null;
-const setStat = t => $('stat').textContent = t;
-const esc = s => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-
-async function load() {
-  const items = await (await fetch('/api/transcriptions')).json();
-  $('empty').style.display = items.length ? 'none' : 'block';
-  $('rows').innerHTML = items.map(i => `<tr data-id="${i.id}">
-    <td class="txt"><div contenteditable data-field="text">${esc(i.text)}</div></td>
-    <td><span class="tag">${esc(i.language) || '?'}</span></td>
-    <td class="meta">${(i.durationS ?? 0).toFixed(1)}s</td>
-    <td class="meta">${i.createdAt ? new Date(i.createdAt).toLocaleTimeString() : ''}</td>
-    <td class="act"><button data-act="save">Save</button><button data-act="del">Delete</button></td>
-  </tr>`).join('');
-  if (!sessionId && items.length) sessionId = items[0].sessionId;
-}
-
-$('rows').addEventListener('click', async e => {
-  const btn = e.target.closest('button'); if (!btn) return;
-  const tr = btn.closest('tr'), id = tr.dataset.id;
-  if (btn.dataset.act === 'del') {
-    await fetch(`/api/transcriptions/${id}`, {method:'DELETE'});
-  } else {
-    const text = tr.querySelector('[data-field="text"]').innerText.trim();
-    if (!text) return;
-    await fetch(`/api/transcriptions/${id}`, {
-      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text})
-    });
-  }
-  load();
-});
-$('refresh').onclick = load;
-
-// Browsers capture at 44.1/48kHz; Whisper wants 16kHz mono.
-function toPCM16(f32, inRate) {
-  const ratio = inRate / 16000;
-  const out = new Int16Array(Math.floor(f32.length / ratio));
-  for (let i = 0; i < out.length; i++) {
-    const s = Math.max(-1, Math.min(1, f32[Math.floor(i * ratio)]));
-    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-  return out.buffer;
-}
-
-async function start() {
-  stream = await navigator.mediaDevices.getUserMedia({
-    audio: {channelCount:1, echoCancellation:true, noiseSuppression:true}
-  });
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/transcribe`);
-  ws.binaryType = 'arraybuffer';
-  ws.onmessage = ev => {
-    const m = JSON.parse(ev.data);
-    if (m.type === 'session') { sessionId = m.sessionId; setStat(m.modelReady ? 'listening' : 'loading model…'); }
-    if (m.type === 'partial') $('partial').textContent = m.text;
-    if (m.type === 'final') { $('partial').textContent = ''; load(); }
-  };
-  ws.onclose = () => { if (recording) stop(); };
-  await new Promise(r => ws.onopen = r);
-  ws.send(JSON.stringify({type:'config', language: $('lang').value}));
-
-  ctx = new AudioContext();
-  node = ctx.createScriptProcessor(4096, 1, 1);
-  node.onaudioprocess = e => {
-    if (ws.readyState === 1) ws.send(toPCM16(e.inputBuffer.getChannelData(0), ctx.sampleRate));
-  };
-  ctx.createMediaStreamSource(stream).connect(node);
-  node.connect(ctx.destination);
-
-  recording = true;
-  $('rec').classList.add('on'); $('rec').textContent = '■ Stop';
-  $('dot').classList.add('on'); setStat('listening');
-}
-
-function stop() {
-  recording = false;
-  try { ws.send('flush'); } catch {}
-  node?.disconnect(); ctx?.close(); stream?.getTracks().forEach(t => t.stop());
-  setTimeout(() => { try { ws.close(); } catch {} load(); }, 1200);
-  $('rec').classList.remove('on'); $('rec').textContent = '● Record';
-  $('dot').classList.remove('on'); setStat('idle');
-}
-
-$('lang').onchange = () => {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify({type:'config', language: $('lang').value}));
-};
-$('rec').onclick = () => recording ? stop() : start().catch(e => { setStat('mic blocked'); console.error(e); });
-
-
-/* ── Agent widget ─────────────────────────────────────────────────────────
-   Patterns borrowed from Linear (docked panel, plain-text responses),
-   HoneyBook (per-response actions + disclaimer) and Apollo ("Thought for Ns").
-   ---------------------------------------------------------------------- */
-let agentEnabled = false, sending = false;
-
-const QUICK = [
-  ['Clean up',  s => `Fetch the transcript for session ${s} and return it cleaned up: fix punctuation and obvious mis-hearings only. Preserve the original language mix and script exactly.`],
-  ['Summarize', s => `Fetch the transcript for session ${s} and summarise it in 3 bullets, in the same language mix the speaker used.`],
-  ['Key points',s => `Fetch the transcript for session ${s} and list any decisions, dates or action items mentioned.`],
-];
-
-function bubble(role, text) {
-  const el = document.createElement('div');
-  el.className = 'msg ' + (role === 'user' ? 'u' : 'a');
-  el.textContent = text;
-  $('wbody').appendChild(el);
-  $('wbody').scrollTop = $('wbody').scrollHeight;
-  return el;
-}
-
-function chips() {
-  const wrap = document.createElement('div');
-  wrap.className = 'chips';
-  QUICK.forEach(([label, build]) => {
-    const b = document.createElement('button');
-    b.className = 'chip';
-    b.textContent = label;
-    b.onclick = () => {
-      if (!sessionId) return bubble('agent', 'Record something first — there is no session to work with yet.');
-      ask(build(sessionId), label);
-    };
-    wrap.appendChild(b);
-  });
-  $('wbody').appendChild(wrap);
-}
-
-function greet() {
-  $('wbody').innerHTML = '';
-  if (!agentEnabled) {
-    const off = document.createElement('div');
-    off.className = 'off';
-    off.innerHTML = 'The agent is not configured.<br><br>Set <code>GOOGLE_GENERATIVE_AI_API_KEY</code> and restart the server to enable it. Speech-to-text works regardless.';
-    $('wbody').appendChild(off);
-    $('wfoot').style.display = 'none';
-    return;
-  }
-  bubble('agent', 'I can work over your transcripts — clean them up, summarise them, or answer questions. I never translate: if you spoke Hinglish, it stays Hinglish.');
-  chips();
-}
-
-async function ask(prompt, label) {
-  if (sending || !agentEnabled) return;
-  sending = true; $('asend').disabled = true;
-  bubble('user', label || prompt);
-
-  const holder = document.createElement('div');
-  holder.className = 'msg a';
-  const thought = document.createElement('div');
-  thought.className = 'thought';
-  thought.textContent = 'Thinking…';
-  const body = document.createElement('div');
-  holder.append(thought, body);
-  $('wbody').appendChild(holder);
-  $('wbody').scrollTop = $('wbody').scrollHeight;
-
-  const t0 = Date.now();
-  try {
-    const r = await fetch('/api/agent/ask', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({prompt})
-    });
-    const j = await r.json();
-    const secs = ((Date.now() - t0) / 1000).toFixed(1);
-    thought.textContent = r.ok ? `Thought for ${secs}s` : 'Failed';
-    body.textContent = j.answer ?? j.message ?? 'No response.';
-
-    if (r.ok) {
-      const row = document.createElement('div');
-      row.className = 'arow';
-      const copy = document.createElement('button');
-      copy.textContent = '⧉ Copy';
-      copy.onclick = () => { navigator.clipboard.writeText(body.textContent); copy.textContent = '✓ Copied'; setTimeout(() => copy.textContent = '⧉ Copy', 1400); };
-      const again = document.createElement('button');
-      again.textContent = '↻ Retry';
-      again.onclick = () => ask(prompt, label);
-      row.append(copy, again);
-      holder.appendChild(row);
-    }
-  } catch (e) {
-    thought.textContent = 'Failed';
-    body.textContent = e.message;
-  } finally {
-    sending = false; $('asend').disabled = false;
-    $('wbody').scrollTop = $('wbody').scrollHeight;
-  }
-}
-
-$('fab').onclick = () => {
-  $('widget').classList.add('open'); $('widget').classList.remove('min');
-  $('fab').classList.add('hidden');
-  if (!$('wbody').childElementCount) greet();
-  $('ain').focus();
-};
-$('wclose').onclick = () => { $('widget').classList.remove('open'); $('fab').classList.remove('hidden'); };
-$('wmin').onclick = () => $('widget').classList.toggle('min');
-
-$('ain').addEventListener('input', e => {
-  e.target.style.height = 'auto';
-  e.target.style.height = Math.min(e.target.scrollHeight, 96) + 'px';
-});
-$('ain').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('asend').click(); }
-});
-$('asend').onclick = () => {
-  const v = $('ain').value.trim();
-  if (!v) return;
-  $('ain').value = ''; $('ain').style.height = 'auto';
-  ask(v);
-};
-
-fetch('/api/agent/status').then(r => r.json()).then(s => { agentEnabled = s.enabled; });
-load();
-</script>
+<script src="/app.js"></script>
 </body>
 </html>

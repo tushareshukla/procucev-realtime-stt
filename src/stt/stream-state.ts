@@ -55,6 +55,14 @@ export class StreamState {
     return this.buffer;
   }
 
+  /**
+   * Whether the window holds any speech. Partials on a silent window cost a
+   * full inference call and can only ever return noise, so callers skip them.
+   */
+  get hasAudibleSpeech(): boolean {
+    return this.hasSpeech;
+  }
+
   /** True once the speaker has paused, or the window has grown too long. */
   shouldCommit(): boolean {
     if (!this.hasSpeech) {

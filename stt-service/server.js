@@ -12,6 +12,8 @@ const MODEL_ID = process.env.WHISPER_MODEL ?? 'Xenova/whisper-small';
 const DTYPE = process.env.WHISPER_DTYPE ?? 'q8';
 const PORT = Number(process.env.PORT ?? 8080);
 const SAMPLE_RATE = 16_000;
+/** Below this RMS the window is treated as silence and never sent to Whisper. */
+const SILENCE_RMS = Number(process.env.SILENCE_RMS ?? 0.005);
 
 env.cacheDir = process.env.MODEL_CACHE ?? '/models';
 env.allowLocalModels = true;
@@ -44,7 +46,7 @@ app.post('/transcribe', async (req, res) => {
     // Whisper needs an explicit language. transformers.js does NOT auto-detect:
     // with none it defaults to English and *translates* rather than transcribes,
     // which destroys code-mixed Hinglish. The caller always sends one.
-    const language = req.query.language || process.env.WHISPER_LANGUAGE || 'hi';
+    const language = req.query.language || process.env.WHISPER_LANGUAGE || 'en';
 
     const buf = req.body;
     if (!buf?.length || buf.length < SAMPLE_RATE * 0.3 * 2) {
@@ -53,6 +55,16 @@ app.post('/transcribe', async (req, res) => {
 
     const audio = new Float32Array(buf.length / 2);
     for (let i = 0; i < audio.length; i++) audio[i] = buf.readInt16LE(i * 2) / 32768;
+
+    // Whisper hallucinates on silence — feed it digital silence and it invents
+    // plausible words ("अपने आदा"). Gate on signal energy before spending an
+    // inference call, which also drops the cost of an idle open mic to zero.
+    let sum = 0;
+    for (let i = 0; i < audio.length; i++) sum += audio[i] * audio[i];
+    const rms = Math.sqrt(sum / audio.length);
+    if (rms < SILENCE_RMS) {
+      return res.json({ text: '', language, confidence: 0, skipped: 'silence' });
+    }
 
     const out = await asr(audio, {
       task: 'transcribe',

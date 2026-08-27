@@ -90,9 +90,14 @@ export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisco
 
     if (await this.maybeCommit(client, session)) return;
 
-    // Emit a partial at most once per REFRESH_MS, and never stack them —
-    // transcription is slower than audio arrives.
-    if (session.bytesSinceRefresh >= this.refreshBytes && !session.busy) {
+    // Emit a partial at most once per REFRESH_MS, never stack them
+    // (transcription is slower than audio arrives), and never spend an
+    // inference call on a window that contains no speech.
+    if (
+      session.bytesSinceRefresh >= this.refreshBytes &&
+      !session.busy &&
+      session.state.hasAudibleSpeech
+    ) {
       session.bytesSinceRefresh = 0;
       session.busy = true;
       try {

@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SAMPLE_RATE } from './stream-state';
 
 /** Hindi default: the target case is Hinglish, and `en` would translate it away. */
-export const DEFAULT_LANGUAGE = process.env.WHISPER_LANGUAGE ?? 'hi';
+export const DEFAULT_LANGUAGE = process.env.WHISPER_LANGUAGE ?? 'en';
 
 /**
  * Whisper runs in a separate Cloud Run service, not here. That keeps this

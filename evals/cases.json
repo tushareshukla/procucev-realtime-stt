@@ -1,0 +1,76 @@
+[
+  {
+    "id": "hinglish-code-mix",
+    "audio": "hinglish.wav",
+    "language": "hi",
+    "reference": "मैं कल ऑफिस जाऊंगा और क्लाइंट के साथ मीटिंग अटेंड करूंगा प्रोजेक्ट का डेडलाइन अगले वीक है",
+    "why": "The core requirement: Hindi-English code-mixing must be transcribed, not translated.",
+    "assert": {
+      "maxWer": 0.9,
+      "mustBeScript": "devanagari",
+      "mustNotBeTranslated": true,
+      "noRepetitionLoop": true
+    },
+    "target": {
+      "maxWer": 0.35,
+      "note": "Quality goal — needs a larger model than whisper-small."
+    }
+  },
+  {
+    "id": "hindi-only",
+    "audio": "hindi.wav",
+    "language": "hi",
+    "reference": "नमस्ते आज मौसम बहुत अच्छा है मैं बाजार जा रहा हूँ",
+    "why": "Plain Hindi should transcribe cleanly in Devanagari.",
+    "assert": {
+      "maxWer": 0.75,
+      "mustBeScript": "devanagari",
+      "noRepetitionLoop": true
+    },
+    "target": {
+      "maxWer": 0.35,
+      "note": "Quality goal — needs a larger model than whisper-small."
+    }
+  },
+  {
+    "id": "english-only",
+    "audio": "english.wav",
+    "language": "en",
+    "reference": "the quarterly report is due next friday please review the numbers before the meeting",
+    "why": "English sessions must still work when the user selects English.",
+    "assert": {
+      "maxWer": 0.25,
+      "mustBeScript": "latin",
+      "noRepetitionLoop": true
+    },
+    "target": {
+      "maxWer": 0.15,
+      "note": "Quality goal — needs a larger model than whisper-small."
+    }
+  },
+  {
+    "id": "short-utterance",
+    "audio": "short.wav",
+    "language": "hi",
+    "reference": "ठीक है",
+    "why": "Short windows are where Whisper most often degenerates into repeated tokens.",
+    "assert": {
+      "noRepetitionLoop": true,
+      "maxWer": 3.2
+    },
+    "target": {
+      "maxWer": 1.0,
+      "note": "Quality goal — needs a larger model than whisper-small."
+    }
+  },
+  {
+    "id": "silence-produces-nothing",
+    "audio": "silence.wav",
+    "language": "hi",
+    "reference": "",
+    "why": "Regression: silent audio once committed as a phantom segment ('- Okay.').",
+    "assert": {
+      "mustBeEmpty": true
+    }
+  }
+]

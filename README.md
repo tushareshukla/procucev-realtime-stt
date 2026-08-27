@@ -56,3 +56,51 @@ is what Hinglish input needs. Hence the language selector in the UI.
 window is re-transcribed every `REFRESH_MS` for partials and committed on a
 silence threshold, keeping a 1 s overlap tail so words spanning a boundary keep
 their context.
+
+## Tests
+
+```bash
+pnpm test          # 31 unit tests, 3 suites
+pnpm test:cov      # with coverage
+```
+
+Covers the rolling-window commit logic (silence gating, overlap tail, flush),
+the STT HTTP client (explicit-language contract, failure handling), and CRUD
+against in-memory SQLite. Several are regression tests for bugs this system
+actually shipped — see the comments marked `Regression:`.
+
+## Evals
+
+```bash
+pnpm eval                                    # against deployed Cloud Run
+EVAL_STT_URL=http://localhost:9000 pnpm eval # against a local service
+```
+
+Runs fixture audio through the inference service and scores it on accuracy
+(WER/CER), the failure modes this system has hit, and latency. Exits non-zero
+on regression, so it works in CI.
+
+What it checks, and why each case exists:
+
+| Case | Guards against |
+|---|---|
+| `hinglish-code-mix` | Translation instead of transcription — the core requirement |
+| `hindi-only` | Devanagari output quality |
+| `english-only` | English still works when selected |
+| `short-utterance` | Repeated-token degeneration on short windows |
+| `silence-produces-nothing` | Whisper hallucinating words from silence |
+
+**Current baseline** (whisper-small q8, 8 vCPU / 16 GiB, synthesised TTS audio):
+
+| Metric | Value | Target |
+|---|---|---|
+| English WER | ~14% | <15% ✅ |
+| Hindi WER | ~64% | <35% ❌ |
+| Hinglish WER | ~82% | <35% ❌ |
+| Real-time factor | ~1.8–2.5x | <1.0x ❌ |
+
+WER budgets in `cases.json` sit just above measured baseline so the suite
+catches regressions today; `target` records where quality needs to reach.
+Closing the Hindi/Hinglish gap needs a larger checkpoint than whisper-small.
+Note the fixtures are synthesised speech, which Whisper handles worse than real
+human audio — treat these as a pessimistic floor.
