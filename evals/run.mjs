@@ -48,7 +48,7 @@ function check(a, text, reference) {
   if (a.mustBeEmpty) return fails;
 
   if (!text) { fails.push('empty transcript'); return fails; }
-  if (a.mustNotBeTranslated && looksTranslated(text)) fails.push('TRANSLATED instead of transcribed (no Devanagari)');
+  if (a.mustNotBeTranslated && looksTranslated(text, a.mustBeScript)) fails.push('TRANSLATED instead of transcribed (no Devanagari)');
   if (a.mustBeScript && script(text) !== a.mustBeScript) fails.push(`script was ${script(text)}, expected ${a.mustBeScript}`);
   if (a.noRepetitionLoop && repetitionRun(text) >= REPETITION_THRESHOLD) fails.push(`repetition loop (run=${repetitionRun(text)})`);
   if (a.maxWer != null) {

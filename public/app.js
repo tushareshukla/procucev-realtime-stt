@@ -1,15 +1,26 @@
+import { api } from './js/api.js';
+
 'use strict';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => (s || '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // ── voice-activity gate ──────────────────────────────────────────────────────
-// Without this the mic streams ~32KB/s of silence and the server bills a
-// Whisper inference call for every silent second.
-const VAD_RMS = 0.012;
-const TAIL_FRAMES = 12;     // ~1s of audio kept after speech stops
-const PREROLL_FRAMES = 4;   // ~350ms captured before speech is detected
+// Gating matters (an open mic otherwise streams ~32KB/s of silence and bills an
+// inference call per silent second) but a fixed threshold is wrong: microphone
+// gain varies enormously, and with echoCancellation/noiseSuppression enabled a
+// normal voice can sit below a hardcoded cutoff, so nothing is ever sent.
+//
+// Instead: measure the ambient noise floor for the first second, then trigger
+// on a multiple of it, clamped into a sane range.
+const NOISE_CALIBRATION_MS = 900;
+const TRIGGER_MULTIPLE = 2.5;   // speech is well above room tone
+const MIN_THRESHOLD = 0.004;    // never so low that silence trips it
+const MAX_THRESHOLD = 0.030;    // never so high that a quiet voice is ignored
+const TAIL_FRAMES = 12;         // ~1s of audio kept after speech stops
+const PREROLL_FRAMES = 8;       // ~700ms captured before speech is detected
 
 let ws, ctx, node, stream, analyser, rafId, startedAt;
+let level = 0;   // live input RMS, surfaced in the UI
 let recording = false, sessionId = null;
 
 // ── recorder ─────────────────────────────────────────────────────────────────
@@ -19,12 +30,32 @@ function setStat(text, mode) {
   d.className = 'dot' + (mode ? ' ' + mode : '');
 }
 
+/**
+ * Float32 -> 16kHz PCM16.
+ *
+ * When the AudioContext already runs at 16kHz the browser has resampled
+ * properly and this is a straight conversion. Otherwise we average each source
+ * window rather than picking one sample: naive decimation aliases everything
+ * above 8kHz back down into the speech band, which measurably degrades
+ * recognition — it was the cause of "audio is not clear".
+ */
 function toPCM16(f32, inRate) {
+  const clamp = (v) => (v < 0 ? Math.max(-1, v) * 0x8000 : Math.min(1, v) * 0x7fff);
+
+  if (inRate === 16000) {
+    const out = new Int16Array(f32.length);
+    for (let i = 0; i < f32.length; i++) out[i] = clamp(f32[i]);
+    return out.buffer;
+  }
+
   const ratio = inRate / 16000;
   const out = new Int16Array(Math.floor(f32.length / ratio));
   for (let i = 0; i < out.length; i++) {
-    const s = Math.max(-1, Math.min(1, f32[Math.floor(i * ratio)]));
-    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    const start = Math.floor(i * ratio);
+    const end = Math.min(f32.length, Math.floor((i + 1) * ratio));
+    let sum = 0;
+    for (let j = start; j < end; j++) sum += f32[j];
+    out[i] = clamp(sum / Math.max(1, end - start));
   }
   return out.buffer;
 }
@@ -44,6 +75,15 @@ function drawWave() {
     g.lineWidth = devicePixelRatio;
     g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
     return;
+  }
+
+  // Reflect input level on the meter — a flat bar means the mic is not
+  // delivering audio, which is otherwise indistinguishable from "not speaking".
+  const fill = $('meterFill');
+  if (fill) {
+    const pctv = Math.min(100, (level / 0.05) * 100);
+    fill.style.width = pctv.toFixed(0) + '%';
+    fill.classList.toggle('hot', pctv > 45);
   }
 
   const bins = new Uint8Array(analyser.frequencyBinCount);
@@ -83,7 +123,14 @@ async function start() {
   await new Promise((r) => (ws.onopen = r));
   ws.send(JSON.stringify({ type: 'config', language: $('lang').value }));
 
-  ctx = new AudioContext();
+  // Request 16kHz directly: the browser resamples far better than we can in a
+  // ScriptProcessor. Falls back to averaged decimation if it declines.
+  try {
+    ctx = new AudioContext({ sampleRate: 16000 });
+  } catch {
+    ctx = new AudioContext();
+  }
+  console.info(`[audio] context sampleRate=${ctx.sampleRate}`);
   const src = ctx.createMediaStreamSource(stream);
   analyser = ctx.createAnalyser();
   analyser.fftSize = 2048;
@@ -92,17 +139,42 @@ async function start() {
   node = ctx.createScriptProcessor(4096, 1, 1);
   const preRoll = [];
   let speaking = false, quiet = 0;
+  let noiseFloor = 0, calibrationFrames = 0, threshold = MIN_THRESHOLD;
+  const framesToCalibrate = Math.ceil((NOISE_CALIBRATION_MS / 1000) * ctx.sampleRate / 4096);
+  let sawSpeech = false, framesSinceStart = 0;
 
   node.onaudioprocess = (e) => {
     if (ws.readyState !== 1) return;
     const frame = e.inputBuffer.getChannelData(0);
     let sum = 0;
     for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
-    const loud = Math.sqrt(sum / frame.length) > VAD_RMS;
+    const rms = Math.sqrt(sum / frame.length);
+    framesSinceStart++;
+
+    // Always show the live input level, so a dead mic is visible immediately
+    // rather than looking like the app is broken.
+    level = rms;
+
+    if (calibrationFrames < framesToCalibrate) {
+      noiseFloor = (noiseFloor * calibrationFrames + rms) / (calibrationFrames + 1);
+      calibrationFrames++;
+      if (calibrationFrames === framesToCalibrate) {
+        threshold = Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, noiseFloor * TRIGGER_MULTIPLE));
+        console.info(`[vad] noise floor ${noiseFloor.toFixed(5)} → threshold ${threshold.toFixed(5)}`);
+        setStat('Listening', 'live');
+      } else {
+        setStat('Calibrating mic…', 'live');
+      }
+      preRoll.push(toPCM16(frame, ctx.sampleRate));
+      if (preRoll.length > PREROLL_FRAMES) preRoll.shift();
+      return;
+    }
+
+    const loud = rms > threshold;
 
     if (loud) {
       if (!speaking) {
-        speaking = true;
+        speaking = true; sawSpeech = true;
         for (const b of preRoll) ws.send(b);   // don't clip the first syllable
         preRoll.length = 0;
         setStat('Speaking', 'speech');
@@ -117,6 +189,12 @@ async function start() {
       if (quiet > TAIL_FRAMES) { speaking = false; quiet = 0; setStat('Listening', 'live'); }
       return;
     }
+
+    // Nothing has ever tripped the gate — say so instead of sitting silent.
+    if (!sawSpeech && framesSinceStart > framesToCalibrate + 90) {
+      setStat('No speech detected — check mic input', 'live');
+    }
+
     preRoll.push(toPCM16(frame, ctx.sampleRate));
     if (preRoll.length > PREROLL_FRAMES) preRoll.shift();
   };
@@ -136,6 +214,8 @@ async function start() {
 
 function stop() {
   recording = false;
+  level = 0;
+  const f = $('meterFill'); if (f) { f.style.width = '0%'; f.classList.remove('hot'); }
   try { ws.send('flush'); } catch {}
   cancelAnimationFrame(rafId);
   node?.disconnect(); analyser = null; ctx?.close();
@@ -152,52 +232,70 @@ $('lang').onchange = () => {
 };
 
 // ── text to speech ───────────────────────────────────────────────────────────
-// Uses the browser's speech synthesis: real voices, adjustable rate and pitch,
-// nothing extra to deploy.
-const synth = window.speechSynthesis;
-let voices = [], speakingId = null;
+// Audio comes from the open-source models running in our own inference
+// service: Kokoro-82M (Apache-2.0) for English, Piper (MIT) for Hindi and
+// other languages. Deliberately not the browser's built-in voices, which are
+// proprietary and vary by operating system.
+let voices = [], playingId = null, audioEl = null;
 
-function loadVoices() {
-  voices = synth ? synth.getVoices() : [];
-  const sel = $('vsel');
-  const want = $('lang').value;
-  const ranked = [...voices].sort((a, b) => {
-    const am = a.lang.toLowerCase().startsWith(want) ? 0 : 1;
-    const bm = b.lang.toLowerCase().startsWith(want) ? 0 : 1;
-    return am - bm || a.name.localeCompare(b.name);
-  });
-  sel.innerHTML = ranked.map((v, i) =>
-    `<option value="${esc(v.name)}">${esc(v.name)} · ${esc(v.lang)}</option>`).join('');
-
-  const matches = voices.filter((v) => v.lang.toLowerCase().startsWith(want)).length;
-  $('vnote').textContent = voices.length
-    ? `${voices.length} system voices available · ${matches} match the selected language.`
-    : 'No speech-synthesis voices found in this browser.';
-  $('voice').classList.toggle('hidden', !voices.length);
+async function loadVoices() {
+  const lang = $('lang').value;
+  try {
+    const { voices: list, engine } = await api.listVoices(lang);
+    voices = list || [];
+    $('vsel').innerHTML = voices
+      .map((v) => `<option value="${esc(v.id)}">${esc(v.name || v.id)}${v.gender ? ' · ' + esc(v.gender) : ''}</option>`)
+      .join('');
+    $('vnote').textContent = voices.length
+      ? `${voices.length} voices via ${engine} (open source), synthesised server-side.`
+      : `No voices available for "${lang}" yet.`;
+    $('voice').classList.toggle('hidden', !voices.length);
+  } catch {
+    $('vnote').textContent = 'Voice list unavailable.';
+    $('voice').classList.add('hidden');
+  }
 }
-if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; }
-$('lang').addEventListener('change', loadVoices);
+
+async function speak(text, id, btn) {
+  if (playingId === id) return stopSpeaking(btn);
+  stopSpeaking();
+
+  playingId = id;
+  btn.classList.add('on');
+  btn.textContent = '⋯';
+  try {
+    const blob = await api.speak({
+      text,
+      language: $('lang').value,
+      voice: $('vsel').value || undefined,
+      speed: Number($('vrate').value) || 1,
+    });
+    if (playingId !== id) return;                 // superseded while synthesising
+    audioEl = new Audio(URL.createObjectURL(blob));
+    audioEl.onended = audioEl.onerror = () => stopSpeaking(btn);
+    btn.textContent = '■';
+    await audioEl.play();
+  } catch (err) {
+    console.error('[tts]', err);
+    $('vnote').textContent = `Playback failed: ${err.message}`;
+    stopSpeaking(btn);
+  }
+}
+
+function stopSpeaking(btn) {
+  if (audioEl) { audioEl.pause(); audioEl = null; }
+  playingId = null;
+  document.querySelectorAll('.ibtn.play').forEach((b) => {
+    b.classList.remove('on');
+    b.textContent = '▶';
+  });
+  if (btn) { btn.classList.remove('on'); btn.textContent = '▶'; }
+}
 
 $('vrate').oninput = (e) => ($('vrateV').textContent = (+e.target.value).toFixed(1) + '×');
-$('vpitch').oninput = (e) => ($('vpitchV').textContent = (+e.target.value).toFixed(1));
 $('vhead').onclick = () => $('voice').classList.toggle('open');
-
-function speak(text, id, btn) {
-  if (!synth) return;
-  if (speakingId === id) { synth.cancel(); speakingId = null; btn.classList.remove('on'); return; }
-  synth.cancel();
-  document.querySelectorAll('.ibtn.play.on').forEach((b) => b.classList.remove('on'));
-
-  const u = new SpeechSynthesisUtterance(text);
-  const chosen = voices.find((v) => v.name === $('vsel').value);
-  if (chosen) { u.voice = chosen; u.lang = chosen.lang; }
-  u.rate = +$('vrate').value;
-  u.pitch = +$('vpitch').value;
-  u.onend = u.onerror = () => { speakingId = null; btn.classList.remove('on'); };
-
-  speakingId = id; btn.classList.add('on');
-  synth.speak(u);
-}
+$('lang').addEventListener('change', loadVoices);
+loadVoices();
 
 // ── history + CRUD ───────────────────────────────────────────────────────────
 let items = [];
@@ -238,103 +336,9 @@ $('rows').addEventListener('click', async (e) => {
   load();
 });
 
-$('refresh').onclick = load;
-$('copyAll').onclick = async () => {
-  await navigator.clipboard.writeText(items.map((i) => i.text).reverse().join('\n'));
-  $('copyAll').textContent = 'Copied';
-  setTimeout(() => ($('copyAll').textContent = 'Copy transcript'), 1400);
-};
 
-// ── agent widget ─────────────────────────────────────────────────────────────
-let agentEnabled = false, sending = false;
-const QUICK = [
-  ['Clean up', (s) => `Fetch the transcript for session ${s} and return it cleaned up: fix punctuation and obvious mis-hearings only. Preserve the original language mix and script exactly.`],
-  ['Summarize', (s) => `Fetch the transcript for session ${s} and summarise it in 3 bullets, in the same language mix the speaker used.`],
-  ['Key points', (s) => `Fetch the transcript for session ${s} and list any decisions, dates or action items mentioned.`],
-];
-
-function bubble(role, text) {
-  const el = document.createElement('div');
-  el.className = 'msg ' + (role === 'user' ? 'u' : 'a');
-  el.textContent = text;
-  $('wbody').appendChild(el);
-  $('wbody').scrollTop = $('wbody').scrollHeight;
-}
-
-function greet() {
-  $('wbody').innerHTML = '';
-  if (!agentEnabled) {
-    const off = document.createElement('div');
-    off.className = 'off';
-    off.innerHTML = 'The agent is not configured.<br><br>Set <code>GOOGLE_GENERATIVE_AI_API_KEY</code> and restart the server. Speech-to-text works regardless.';
-    $('wbody').appendChild(off);
-    $('wfoot').style.display = 'none';
-    return;
-  }
-  bubble('agent', 'I can clean up, summarise, or answer questions about your transcripts. I never translate — if you spoke Hinglish, it stays Hinglish.');
-  const wrap = document.createElement('div');
-  wrap.className = 'chips';
-  QUICK.forEach(([label, build]) => {
-    const b = document.createElement('button');
-    b.className = 'qchip'; b.textContent = label;
-    b.onclick = () => sessionId
-      ? ask(build(sessionId), label)
-      : bubble('agent', 'Record something first — there is no session yet.');
-    wrap.appendChild(b);
-  });
-  $('wbody').appendChild(wrap);
-}
-
-async function ask(prompt, label) {
-  if (sending || !agentEnabled) return;
-  sending = true; $('asend').disabled = true;
-  bubble('user', label || prompt);
-
-  const holder = document.createElement('div'); holder.className = 'msg a';
-  const thought = document.createElement('div'); thought.className = 'thought'; thought.textContent = 'Thinking…';
-  const body = document.createElement('div');
-  holder.append(thought, body); $('wbody').appendChild(holder);
-
-  const t0 = Date.now();
-  try {
-    const r = await fetch('/api/agent/ask', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }),
-    });
-    const j = await r.json();
-    thought.textContent = r.ok ? `Thought for ${((Date.now() - t0) / 1000).toFixed(1)}s` : 'Failed';
-    body.textContent = j.answer ?? j.message ?? 'No response.';
-    if (r.ok) {
-      const row = document.createElement('div'); row.className = 'arow';
-      const copy = document.createElement('button'); copy.textContent = '⧉ Copy';
-      copy.onclick = () => { navigator.clipboard.writeText(body.textContent); copy.textContent = '✓ Copied'; };
-      const again = document.createElement('button'); again.textContent = '↻ Retry';
-      again.onclick = () => ask(prompt, label);
-      row.append(copy, again); holder.appendChild(row);
-    }
-  } catch (err) {
-    thought.textContent = 'Failed'; body.textContent = err.message;
-  } finally {
-    sending = false; $('asend').disabled = false;
-    $('wbody').scrollTop = $('wbody').scrollHeight;
-  }
-}
-
-$('fab').onclick = () => {
-  $('widget').classList.add('open'); $('fab').classList.add('hidden');
-  if (!$('wbody').childElementCount) greet();
-  $('ain').focus();
-};
-$('wclose').onclick = () => { $('widget').classList.remove('open'); $('fab').classList.remove('hidden'); };
-$('wmin').onclick = () => $('widget').classList.toggle('min');
-$('ain').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('asend').click(); }
-});
-$('asend').onclick = () => {
-  const v = $('ain').value.trim(); if (!v) return;
-  $('ain').value = ''; ask(v);
-};
-
-fetch('/api/agent/status').then((r) => r.json()).then((s) => (agentEnabled = s.enabled));
+// History reloads automatically after each committed segment; the manual
+// Refresh and Copy controls were removed as redundant.
 addEventListener('resize', drawWave);
 drawWave();
 load();

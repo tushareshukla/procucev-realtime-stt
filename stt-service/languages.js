@@ -8,7 +8,7 @@ export const BCP47 = {
   en: 'en-US', 'en-in': 'en-IN',
   hi: 'hi-IN', bn: 'bn-IN', ta: 'ta-IN', te: 'te-IN',
   mr: 'mr-IN', gu: 'gu-IN', kn: 'kn-IN', ml: 'ml-IN', pa: 'pa-Guru-IN',
-  ur: 'ur-IN', es: 'es-US', fr: 'fr-FR', de: 'de-DE',
+  ur: 'ur-PK', es: 'es-US', fr: 'fr-FR', de: 'de-DE',
   zh: 'cmn-Hans-CN', ja: 'ja-JP', ko: 'ko-KR', ar: 'ar-EG',
   pt: 'pt-BR', ru: 'ru-RU', it: 'it-IT', nl: 'nl-NL', tr: 'tr-TR',
 };

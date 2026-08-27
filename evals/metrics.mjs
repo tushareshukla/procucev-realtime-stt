@@ -58,8 +58,12 @@ export function script(text) {
  * Detect the failure where Whisper translated instead of transcribing: Hindi
  * speech comes back as fluent Latin-script English with no Devanagari at all.
  */
-export function looksTranslated(text) {
+export function looksTranslated(text, expectedScript = 'devanagari') {
   if (!text) return false;
+  // Only meaningful when we expected a non-Latin script: fluent Latin-script
+  // output where Devanagari was expected means Whisper translated instead of
+  // transcribing. English output for an English case is not a translation.
+  if (expectedScript !== 'devanagari') return false;
   const hasDev = DEVANAGARI.test(text);
   const latinWords = (text.match(/[a-zA-Z]{2,}/g) || []).length;
   return !hasDev && latinWords >= 3;

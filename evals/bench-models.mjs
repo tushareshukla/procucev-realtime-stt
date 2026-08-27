@@ -63,7 +63,7 @@ for (const model of MODELS) {
       cer: c.reference ? cer(c.reference, text) : null,
       rtf: latencyS / durationS,
       script: script(text),
-      translated: looksTranslated(text),
+      translated: looksTranslated(text, c.assert?.mustBeScript),
       repetition: repetitionRun(text),
     });
     process.stderr.write(`  ${c.id.padEnd(26)} ${latencyS.toFixed(1)}s\n`);

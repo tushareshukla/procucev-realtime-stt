@@ -13,6 +13,7 @@
 import express from 'express';
 import { GoogleAuth } from 'google-auth-library';
 import { toBcp47 } from './languages.js';
+import { synthesize, listVoices, engineFor } from './tts.js';
 
 const ENGINE = (process.env.STT_ENGINE ?? 'chirp').toLowerCase();
 const PORT = Number(process.env.PORT ?? 8080);
@@ -161,6 +162,32 @@ app.post('/transcribe', async (req, res) => {
   } catch (err) {
     console.error('transcribe failed:', err.message);
     res.status(502).json({ error: err.message, engine: ENGINE });
+  }
+});
+
+// ── text to speech ───────────────────────────────────────────────────────────
+
+app.get('/voices', async (req, res) => {
+  try {
+    res.json({ voices: await listVoices(req.query.language ?? 'en'),
+               engine: engineFor(req.query.language ?? 'en') });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/speak', express.json({ limit: '256kb' }), async (req, res) => {
+  const { text, language = 'en', voice, speed } = req.body ?? {};
+  try {
+    const { audio, engine } = await synthesize({
+      text, language, voice, speed: Number(speed) || 1,
+    });
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('X-TTS-Engine', engine);
+    res.send(audio);
+  } catch (err) {
+    console.error('speak failed:', err.message);
+    res.status(502).json({ error: err.message });
   }
 });
 

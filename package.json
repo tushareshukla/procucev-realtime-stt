@@ -10,7 +10,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "eval": "node evals/run.mjs"
+    "eval": "node evals/run.mjs",
+    "test:web": "node --test \"public/js/*.test.mjs\"",
+    "test:all": "jest && npm run test:web"
   },
   "dependencies": {
     "@ai-sdk/google": "^1.2.22",
@@ -36,6 +38,7 @@
     "@huggingface/transformers": "^4.2.0",
     "@nestjs/cli": "^11.0.0",
     "@nestjs/testing": "^12.0.1",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.5",
     "@types/supertest": "^7.2.1",

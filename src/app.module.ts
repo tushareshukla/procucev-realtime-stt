@@ -7,6 +7,8 @@ import { HealthController } from './health.controller';
 import { MastraController } from './mastra/mastra.controller';
 import { MastraService } from './mastra/mastra.service';
 import { SttService } from './stt/stt.service';
+import { TtsController } from './tts/tts.controller';
+import { TtsService } from './tts/tts.service';
 import { Transcription } from './transcription/transcription.entity';
 import { TranscriptionController } from './transcription/transcription.controller';
 import { TranscriptionGateway } from './transcription/transcription.gateway';
@@ -41,7 +43,7 @@ const usePostgres = databaseUrl.startsWith('postgres');
     TypeOrmModule.forFeature([Transcription]),
     ServeStaticModule.forRoot({ rootPath: join(__dirname, '..', 'public') }),
   ],
-  controllers: [HealthController, TranscriptionController, MastraController],
-  providers: [TranscriptionService, SttService, TranscriptionGateway, MastraService],
+  controllers: [HealthController, TranscriptionController, TtsController, MastraController],
+  providers: [TranscriptionService, SttService, TtsService, TranscriptionGateway, MastraService],
 })
 export class AppModule {}
