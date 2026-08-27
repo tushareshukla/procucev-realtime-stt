@@ -161,31 +161,16 @@
       padding:7px 13px;font-size:12.5px;cursor:pointer;transition:.12s}
   .ex:hover{border-color:var(--acc);color:var(--fg)}
   .hint{font-size:12.5px;color:var(--dim)}
+  #sttLang{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+           border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;outline:none}
+  .ex .tag{display:inline-block;margin-right:7px;padding:1px 6px;border-radius:4px;
+           background:var(--line);color:var(--mut);font-size:10.5px;text-transform:uppercase}
 </style>
 </head>
 <body>
 
 <header>
   <span class="brand">procucev</span>
-  <span class="sp"></span>
-  <span class="chip">
-    <span style="color:var(--mut);font-size:12px">Language</span>
-    <select id="lang">
-      <option value="en" selected>English</option>
-      <option value="hi">Hindi</option>
-      <option value="bn">Bengali</option>
-      <option value="ta">Tamil</option>
-      <option value="te">Telugu</option>
-      <option value="mr">Marathi</option>
-      <option value="gu">Gujarati</option>
-      <option value="es">Spanish</option>
-      <option value="fr">French</option>
-      <option value="de">German</option>
-      <option value="zh">Chinese</option>
-      <option value="ja">Japanese</option>
-      <option value="ar">Arabic</option>
-    </select>
-  </span>
 </header>
 
 <main>
@@ -208,6 +193,21 @@
       <div id="lastClip"></div>
       <div class="controls">
         <button class="rec" id="rec"><span class="ico"></span><span id="recLabel">Record</span></button>
+        <select id="sttLang" title="Spoken language">
+          <option value="en" selected>English</option>
+          <option value="hi">Hindi / Hinglish</option>
+          <option value="bn">Bengali</option>
+          <option value="ta">Tamil</option>
+          <option value="te">Telugu</option>
+          <option value="mr">Marathi</option>
+          <option value="gu">Gujarati</option>
+          <option value="es">Spanish</option>
+          <option value="fr">French</option>
+          <option value="de">German</option>
+          <option value="zh">Chinese</option>
+          <option value="ja">Japanese</option>
+          <option value="ar">Arabic</option>
+        </select>
         <button class="ghost" id="save" hidden>Save</button>
         <button class="ghost" id="discard" hidden>Discard</button>
         <span class="hint" id="hint">Audio is only sent while you're speaking.</span>

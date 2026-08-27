@@ -1,5 +1,6 @@
 import { api } from './js/api.js?v=__BUILD__';
 import { pcmChunksToWavBlob, readWavStream } from './js/wav.js?v=__BUILD__';
+import { getLanguage, setLanguage, onLanguageChange, detectLanguage } from './js/lang.js?v=__BUILD__';
 
 'use strict';
 const $ = (id) => document.getElementById(id);
@@ -151,7 +152,7 @@ async function start() {
   };
   ws.onclose = () => { if (recording) stop(); };
   await new Promise((r) => (ws.onopen = r));
-  ws.send(JSON.stringify({ type: 'config', language: $('lang').value }));
+  ws.send(JSON.stringify({ type: 'config', language: $('sttLang').value }));
 
   // Request 16kHz directly: the browser resamples far better than we can in a
   // ScriptProcessor. Falls back to averaged decimation if it declines.
@@ -271,7 +272,7 @@ function stop() {
 $('rec').onclick = () =>
   recording ? stop() : start().catch((e) => { setStat('Mic blocked'); console.error(e); });
 $('lang').onchange = () => {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'config', language: $('lang').value }));
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'config', language: $('sttLang').value }));
 };
 
 // ── text to speech ───────────────────────────────────────────────────────────
@@ -282,7 +283,7 @@ $('lang').onchange = () => {
 let voices = [], playingId = null, audioEl = null;
 
 async function loadVoices() {
-  const lang = $('lang').value;
+  const lang = getLanguage();
   try {
     const { voices: list, engine } = await api.listVoices(lang);
     voices = list || [];
@@ -309,7 +310,7 @@ async function speak(text, id, btn) {
   try {
     const blob = await api.speak({
       text,
-      language: $('lang').value,
+      language: getLanguage(),
       voice: $('vsel').value || undefined,
       speed: Number($('vrate').value) || 1,
     });
@@ -337,7 +338,6 @@ function stopSpeaking(btn) {
 
 $('vrate').oninput = (e) => ($('vrateV').textContent = (+e.target.value).toFixed(1) + '×');
 $('vhead').onclick = () => $('voice').classList.toggle('open');
-$('lang').addEventListener('change', loadVoices);
 loadVoices();
 
 /** Holds the finished recording until the user decides to keep it. */
@@ -388,7 +388,7 @@ $('save').onclick = async () => {
   try {
     await api.createTranscription({
       text: pending.text,
-      language: pending.language || $('lang').value,
+      language: pending.language || $('sttLang').value,
       durationS: pending.durationS || 0,
       sessionId: pending.sessionId,
       audioBase64: pending.blob ? await blobToBase64(pending.blob) : undefined,
@@ -451,36 +451,47 @@ drawWave();
 load();
 
 // ── example prompts ──────────────────────────────────────────────────────────
-const EXAMPLES = {
-  en: [
-    'The quarterly report is due next Friday.',
-    'Please review the numbers before the meeting.',
-    'Your order has been shipped and arrives tomorrow.',
-    'Welcome to procucev. How can I help you today?',
-  ],
-  hi: [
-    'मैं कल ऑफिस जाऊंगा और क्लाइंट के साथ मीटिंग अटेंड करूंगा।',
-    'आपका ऑर्डर भेज दिया गया है।',
-    'नमस्ते, आज मौसम बहुत अच्छा है।',
-    'कृपया मीटिंग से पहले रिपोर्ट देख लें।',
-  ],
-};
+const EXAMPLES = [
+  { lang: 'en', label: 'English',  text: 'The quarterly report is due next Friday.' },
+  { lang: 'hi', label: 'Hindi',    text: 'नमस्ते, आज मौसम बहुत अच्छा है।' },
+  { lang: 'hi', label: 'Hinglish', text: 'मैं कल office जाऊंगा और client के साथ meeting attend करूंगा।' },
+  { lang: 'en', label: 'English',  text: 'Your order has been shipped and arrives tomorrow.' },
+  { lang: 'bn', label: 'Bengali',  text: 'আমি ভালো আছি, আপনি কেমন আছেন?' },
+  { lang: 'ta', label: 'Tamil',    text: 'வணக்கம், இன்று வானிலை நன்றாக இருக்கிறது.' },
+  { lang: 'te', label: 'Telugu',   text: 'నమస్కారం, మీరు ఎలా ఉన్నారు?' },
+  { lang: 'mr', label: 'Marathi',  text: 'नमस्कार, तुम्ही कसे आहात?' },
+  { lang: 'es', label: 'Spanish',  text: 'El informe trimestral vence el próximo viernes.' },
+  { lang: 'fr', label: 'French',   text: 'Bonjour, comment allez-vous aujourd\'hui ?' },
+  { lang: 'de', label: 'German',   text: 'Guten Tag, wie geht es Ihnen heute?' },
+  { lang: 'ja', label: 'Japanese', text: 'こんにちは、今日はいい天気ですね。' },
+];
 
 function renderExamples() {
-  const lang = $('lang').value;
-  const list = EXAMPLES[lang] ?? EXAMPLES.en;
   $('ttsExamples').innerHTML = '';
-  for (const text of list) {
+  for (const ex of EXAMPLES) {
     const b = document.createElement('button');
     b.className = 'ex';
-    b.textContent = text.length > 46 ? text.slice(0, 44) + '…' : text;
-    b.title = text;
-    b.onclick = () => { $('ttsText').value = text; $('ttsText').focus(); };
+    b.title = ex.text;
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = ex.label;
+    b.append(tag, document.createTextNode(
+      ex.text.length > 40 ? ex.text.slice(0, 38) + '…' : ex.text));
+    b.onclick = () => {
+      $('ttsText').value = ex.text;
+      // The example states its own language, which is more reliable than
+      // inferring it, especially for code-mixed text.
+      setLanguage(ex.lang);
+      $('ttsText').focus();
+    };
     $('ttsExamples').appendChild(b);
   }
 }
-$('lang').addEventListener('change', renderExamples);
 renderExamples();
+
+// Typed input picks its language from the script it is written in.
+$('ttsText').addEventListener('input', (e) => setLanguage(detectLanguage(e.target.value)));
+onLanguageChange(() => loadVoices());
 
 // ── tabs ─────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach((btn) => {
@@ -531,7 +542,7 @@ $('ttsGo').onclick = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text,
-        language: $('lang').value,
+        language: getLanguage(),
         voice: $('vsel').value || undefined,
         speed: Number($('vrate').value) || 1,
       }),
@@ -570,7 +581,7 @@ function addGenerated(blob, text, chunks) {
 
   const meta = document.createElement('div');
   meta.className = 'clip-meta';
-  meta.innerHTML = `<span>${esc($('lang').value)}</span><span>${esc($('vsel').value || 'default voice')}</span><span>${chunks} segment${chunks > 1 ? 's' : ''}</span>`;
+  meta.innerHTML = `<span>${esc(getLanguage())}</span><span>${esc($('vsel').value || 'default voice')}</span><span>${chunks} segment${chunks > 1 ? 's' : ''}</span>`;
 
   row.append(t, audio, meta);
   $('ttsOut').prepend(row);
