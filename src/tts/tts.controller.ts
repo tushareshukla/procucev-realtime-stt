@@ -32,21 +32,32 @@ export class TtsController {
 
   @Post('stream')
   async stream(@Body() dto: SpeakDto, @Res() res: Response) {
-    const upstream = await this.tts.speakStream({
-      text: dto.text,
-      language: dto.language ?? 'en',
-      voice: dto.voice,
-      speed: dto.speed ?? 1,
-    });
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Cache-Control', 'no-store');
-    // Chunked passthrough: the first sentence reaches the browser while later
-    // ones are still being synthesised.
-    upstream.on('error', (err) => {
-      this.log.error(`tts stream aborted: ${err.message}`);
-      res.destroy(err);
-    });
-    upstream.pipe(res);
+    try {
+      const upstream = await this.tts.speakStream({
+        text: dto.text,
+        language: dto.language ?? 'en',
+        voice: dto.voice,
+        speed: dto.speed ?? 1,
+      });
+
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Cache-Control', 'no-store');
+
+      // Chunked passthrough: the first sentence reaches the browser while
+      // later ones are still being synthesised.
+      upstream.on('error', (err: Error) => {
+        this.log.error(`tts stream aborted: ${err.message}`);
+        if (!res.headersSent) res.status(502).json({ error: err.message });
+        else res.destroy(err);
+      });
+      upstream.pipe(res);
+    } catch (err) {
+      // Nest would otherwise mask this as a bare "Internal server error",
+      // which makes a proxy failure indistinguishable from a bug here.
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error(`tts stream failed: ${message}`);
+      if (!res.headersSent) res.status(502).json({ error: message });
+    }
   }
 
   @Post('speak')
