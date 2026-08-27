@@ -9,7 +9,7 @@ CRUD over the transcription history.
 | Concern | Choice | Why |
 |---|---|---|
 | API | NestJS 11 | Requested; DI keeps the STT/agent layers separable |
-| STT | Whisper small (`@huggingface/transformers`, ONNX q8) | Self-hosted, MIT, handles code-mixing |
+| STT | Google Chirp 2 (Speech-to-Text v2), Whisper selectable | 2.3% mean WER vs 115% for whisper-small |
 | Agent | Mastra + Gemini | Transcript cleanup / summarise / Q&A |
 | DB | TypeORM — SQLite locally, Postgres in prod | Swap via `DATABASE_URL`, no code change |
 | Transport | raw `ws` | Browser streams binary PCM16 frames |
@@ -30,8 +30,11 @@ loads in <1 s.
 | Env | Default | Notes |
 |---|---|---|
 | `DATABASE_URL` | _(unset → SQLite)_ | `postgres://…` switches dialect |
-| `WHISPER_MODEL` | `Xenova/whisper-small` | `whisper-large-v3` for best accuracy |
-| `WHISPER_LANGUAGE` | `hi` | Default session language |
+| `STT_ENGINE` | `chirp` | `whisper` for a fully self-hosted path |
+| `SPEECH_MODEL` | `chirp_2` | Google STT v2 model |
+| `SPEECH_LOCATION` | `us-central1` | Chirp 2 is region-bound |
+| `WHISPER_MODEL` | `Xenova/whisper-small` | Only when `STT_ENGINE=whisper` |
+| `WHISPER_LANGUAGE` | `en` | Default session language |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | _(unset)_ | Enables the Mastra agent endpoints |
 | `REFRESH_MS` | `900` | Partial-transcript cadence |
 | `SILENCE_COMMIT_S` | `0.8` | Pause length that commits a segment |
@@ -90,17 +93,44 @@ What it checks, and why each case exists:
 | `short-utterance` | Repeated-token degeneration on short windows |
 | `silence-produces-nothing` | Whisper hallucinating words from silence |
 
-**Current baseline** (whisper-small q8, 8 vCPU / 16 GiB, synthesised TTS audio):
+**Current results** (Chirp 2, `us-central1`):
 
-| Metric | Value | Target |
+| Case | WER | CER |
 |---|---|---|
-| English WER | ~14% | <15% ✅ |
-| Hindi WER | ~64% | <35% ❌ |
-| Hinglish WER | ~82% | <35% ❌ |
-| Real-time factor | ~1.8–2.5x | <1.0x ❌ |
+| Hinglish code-mix | **0.0%** | 0.0% |
+| English | **0.0%** | 0.0% |
+| Short utterance | **0.0%** | 0.0% |
+| Hindi | 9.1% | 2.6% |
+| **Mean** | **2.3%** | — |
 
-WER budgets in `cases.json` sit just above measured baseline so the suite
-catches regressions today; `target` records where quality needs to reach.
-Closing the Hindi/Hinglish gap needs a larger checkpoint than whisper-small.
-Note the fixtures are synthesised speech, which Whisper handles worse than real
-human audio — treat these as a pessimistic floor.
+Real-time factor ~1.0x. Silence returns empty rather than a hallucinated
+phrase.
+
+For comparison, self-hosted whisper-small on the same fixtures: 82% WER on
+Hinglish, 64% on Hindi, 115% mean, 5.7x slower than real time. It remains
+available via `STT_ENGINE=whisper` for a fully self-hosted deployment.
+
+## Deployment
+
+| Component | Where | Resources |
+|---|---|---|
+| Inference (`stt-service`) | Cloud Run `asia-south1` | 2 vCPU / 1 GiB, scales to zero |
+| Backend + frontend | Dokploy → `prakriya-staging-app` | ~200 MB, no ML deps |
+| Postgres | Dokploy, same VM | `postgres:17-alpine` |
+
+`GET /readyz` reports database dialect, connection state, and the upstream
+engine and model, so a misconfigured deploy is visible without shelling in.
+
+### Two operational notes
+
+**`/healthz` is unreachable through some network paths.** Requests to that
+exact path 404 with a Google frontend page while `/transcribe` on the same
+revision serves normally, and the container logs show them never arriving.
+The readiness probe therefore POSTs a 2-byte body to `/transcribe`, which
+exercises the real code path and echoes the configuration back.
+
+**Chirp 2 is not available in `asia-south1`.** Inference runs in Cloud Run
+Mumbai but calls the Speech API in `us-central1`, which is where the model is
+published. Multi-language recognition (several `languageCodes` at once) is only
+offered in the `eu`/`global`/`us` multi-regions and is mutually exclusive with
+Chirp 2, so the UI selects one language per session instead.
