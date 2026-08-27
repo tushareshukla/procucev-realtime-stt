@@ -41,7 +41,19 @@ const usePostgres = databaseUrl.startsWith('postgres');
           },
     ),
     TypeOrmModule.forFeature([Transcription]),
-    ServeStaticModule.forRoot({ rootPath: join(__dirname, '..', 'public') }),
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, '..', 'public'),
+      serveStaticOptions: {
+        // The UI is a handful of small files that change on every deploy.
+        // Without this browsers keep serving a stale app.js after a release,
+        // which looks exactly like the new code being broken.
+        setHeaders: (res, path) => {
+          if (/\.(html|js|css)$/.test(path)) {
+            res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+          }
+        },
+      },
+    }),
   ],
   controllers: [HealthController, TranscriptionController, TtsController, MastraController],
   providers: [TranscriptionService, SttService, TtsService, TranscriptionGateway, MastraService],
