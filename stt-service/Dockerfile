@@ -14,12 +14,20 @@ RUN npm install --omit=dev
 # Baked in: downloading at boot would exceed Cloud Run's startup probe and
 # re-pull ~900MB on every cold start.
 ARG WHISPER_MODEL=onnx-community/whisper-large-v3-turbo
-ENV WHISPER_MODEL=${WHISPER_MODEL}
+# The baked dtype MUST match the runtime dtype, or the container downloads a
+# different set of weights on first request and blows past the startup probe.
+# fp32, deliberately. Measured on Cloud Run (x86) with these fixtures:
+#   q8   — mean WER 39.9%, RTF 2.6x   (int8 kernels degrade badly on x86;
+#                                       the same q8 build scores 13.2% on ARM)
+#   fp16 — mean WER 13.2%, RTF 4.8x   (no CPU acceleration, so it is emulated)
+#   fp32 — mean WER 13.2%, RTF 3.2x   <- best accuracy AND fastest of the two
+ARG WHISPER_DTYPE=fp32
+ENV WHISPER_MODEL=${WHISPER_MODEL} WHISPER_DTYPE=${WHISPER_DTYPE}
 RUN node -e "\
 import('@huggingface/transformers').then(async ({pipeline, env}) => { \
   env.cacheDir='/models'; \
-  await pipeline('automatic-speech-recognition', process.env.WHISPER_MODEL, {dtype:'q8'}); \
-  console.log('whisper baked'); \
+  await pipeline('automatic-speech-recognition', process.env.WHISPER_MODEL, {dtype: process.env.WHISPER_DTYPE}); \
+  console.log('whisper baked:', process.env.WHISPER_DTYPE); \
 })"
 
 # ── TTS: Kokoro-82M (Apache-2.0), English ────────────────────────────────────
