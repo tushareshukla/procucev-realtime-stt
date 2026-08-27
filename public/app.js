@@ -1,5 +1,5 @@
-import { api } from './js/api.js';
-import { pcmChunksToWavBlob, readWavStream } from './js/wav.js';
+import { api } from './js/api.js?v=__BUILD__';
+import { pcmChunksToWavBlob, readWavStream } from './js/wav.js?v=__BUILD__';
 
 'use strict';
 const $ = (id) => document.getElementById(id);
