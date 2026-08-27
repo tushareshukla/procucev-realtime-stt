@@ -4,6 +4,10 @@ WORKDIR /srv
 RUN corepack enable
 
 COPY package.json pnpm-lock.yaml ./
+# pnpm's minimumReleaseAge policy rejects transitive deps published in the last
+# ~24h. That guard is worth keeping for local installs, but it makes container
+# builds fail non-deterministically based on when upstream last published, so
+# it is relaxed here only — the lockfile still pins exact versions.
 RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.json nest-cli.json ./

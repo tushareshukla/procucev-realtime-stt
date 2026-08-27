@@ -60,6 +60,11 @@ app.post('/transcribe', async (req, res) => {
       return_timestamps: false,
       chunk_length_s: 30,
       stride_length_s: 5,
+      // Whisper degenerates into repeated-token loops on short or noisy
+      // windows ("करुँँँँँ…"). These bound it without hurting normal output.
+      no_repeat_ngram_size: 3,
+      repetition_penalty: 1.15,
+      num_beams: 1,
     });
 
     const text = String(out?.text ?? '').trim();

@@ -39,5 +39,6 @@
       "better-sqlite3",
       "protobufjs"
     ]
-  }
+  },
+  "packageManager": "pnpm@10.30.0"
 }
