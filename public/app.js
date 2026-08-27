@@ -137,7 +137,17 @@ async function start() {
       }
       if (!m.committed && !m.tentative) live.textContent = m.text || '';
     }
-    if (m.type === 'final') { $('live').textContent = ''; load(); }
+    if (m.type === 'final') {
+      // Nothing is persisted until the user presses Save, so hold it here.
+      pending = {
+        text: [pending?.text, m.item.text].filter(Boolean).join(' '),
+        language: m.item.language,
+        durationS: (pending?.durationS ?? 0) + (m.item.durationS ?? 0),
+        sessionId: m.item.sessionId,
+        blob: pending?.blob,
+      };
+      $('live').textContent = pending.text;
+    }
   };
   ws.onclose = () => { if (recording) stop(); };
   await new Promise((r) => (ws.onopen = r));
@@ -248,7 +258,11 @@ function stop() {
   setTimeout(async () => {
     try { ws.close(); } catch {}
     await load();
-    if (captured.length) showRecording(pcmChunksToWavBlob(captured, 16000));
+    if (captured.length) {
+      const blob = pcmChunksToWavBlob(captured, 16000);
+      pending = { ...(pending ?? { text: '' }), blob };
+      showRecording(blob);
+    }
   }, 1400);
   $('rec').classList.remove('on'); $('recLabel').textContent = 'Record';
   setStat('Idle'); drawWave();
@@ -326,19 +340,68 @@ $('vhead').onclick = () => $('voice').classList.toggle('open');
 $('lang').addEventListener('change', loadVoices);
 loadVoices();
 
-/** Put the just-finished recording under the live panel, with its transcript. */
+/** Holds the finished recording until the user decides to keep it. */
+let pending = null;
+
 function showRecording(blob) {
   const holder = $('lastClip');
   if (!holder) return;
   holder.innerHTML = '';
+  holder.className = 'clip';
+
   const audio = document.createElement('audio');
   audio.controls = true;
   audio.src = URL.createObjectURL(blob);
+
   const label = document.createElement('div');
   label.className = 'clip-meta';
-  label.textContent = 'Your recording';
+  label.textContent = pending?.text ? 'Review, then Save to keep it' : 'No speech was transcribed';
+
   holder.append(label, audio);
+  $('save').hidden = !pending?.text;
+  $('discard').hidden = false;
 }
+
+function clearPending() {
+  pending = null;
+  $('lastClip').innerHTML = '';
+  $('lastClip').className = '';
+  $('live').innerHTML = '<span class="ph">Press Record and start speaking.</span>';
+  $('save').hidden = true;
+  $('discard').hidden = true;
+}
+
+const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1]);
+  r.onerror = reject;
+  r.readAsDataURL(blob);
+});
+
+$('discard').onclick = clearPending;
+
+$('save').onclick = async () => {
+  if (!pending?.text) return;
+  const btn = $('save');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    await api.createTranscription({
+      text: pending.text,
+      language: pending.language || $('lang').value,
+      durationS: pending.durationS || 0,
+      sessionId: pending.sessionId,
+      audioBase64: pending.blob ? await blobToBase64(pending.blob) : undefined,
+    });
+    clearPending();
+    await load();
+  } catch (err) {
+    $('hint').textContent = `Save failed: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+};
 
 // ── history + CRUD ───────────────────────────────────────────────────────────
 let items = [];
@@ -351,6 +414,7 @@ async function load() {
     <div class="row" data-id="${i.id}">
       <div class="row-main">
         <div class="row-text" contenteditable data-field="text">${esc(i.text)}</div>
+        ${i.hasAudio ? `<audio controls preload="none" src="/api/transcriptions/${i.id}/audio"></audio>` : ''}
         <div class="row-meta">
           <span>${esc(i.language) || '—'}</span>
           <span>${(i.durationS ?? 0).toFixed(1)}s</span>
@@ -358,7 +422,7 @@ async function load() {
         </div>
       </div>
       <div class="row-acts">
-        <button class="ibtn play" data-act="play" title="Play with speech synthesis">▶</button>
+        <button class="ibtn play" data-act="play" title="Read aloud with the TTS voice">▶</button>
         <button class="ibtn" data-act="save" title="Save edit">Save</button>
         <button class="ibtn danger" data-act="del" title="Delete">✕</button>
       </div>
@@ -385,6 +449,38 @@ $('rows').addEventListener('click', async (e) => {
 addEventListener('resize', drawWave);
 drawWave();
 load();
+
+// ── example prompts ──────────────────────────────────────────────────────────
+const EXAMPLES = {
+  en: [
+    'The quarterly report is due next Friday.',
+    'Please review the numbers before the meeting.',
+    'Your order has been shipped and arrives tomorrow.',
+    'Welcome to procucev. How can I help you today?',
+  ],
+  hi: [
+    'मैं कल ऑफिस जाऊंगा और क्लाइंट के साथ मीटिंग अटेंड करूंगा।',
+    'आपका ऑर्डर भेज दिया गया है।',
+    'नमस्ते, आज मौसम बहुत अच्छा है।',
+    'कृपया मीटिंग से पहले रिपोर्ट देख लें।',
+  ],
+};
+
+function renderExamples() {
+  const lang = $('lang').value;
+  const list = EXAMPLES[lang] ?? EXAMPLES.en;
+  $('ttsExamples').innerHTML = '';
+  for (const text of list) {
+    const b = document.createElement('button');
+    b.className = 'ex';
+    b.textContent = text.length > 46 ? text.slice(0, 44) + '…' : text;
+    b.title = text;
+    b.onclick = () => { $('ttsText').value = text; $('ttsText').focus(); };
+    $('ttsExamples').appendChild(b);
+  }
+}
+$('lang').addEventListener('change', renderExamples);
+renderExamples();
 
 // ── tabs ─────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach((btn) => {

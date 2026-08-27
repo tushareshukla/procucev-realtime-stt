@@ -35,6 +35,13 @@ export class TranscriptionService {
     await this.repo.remove(row);
   }
 
+  /** Load a row including its audio payload, which list queries omit. */
+  async findAudio(id: number): Promise<string> {
+    const row = await this.repo.findOne({ where: { id }, select: { id: true, audio: true } });
+    if (!row?.audio) throw new NotFoundException(`no audio for transcription ${id}`);
+    return row.audio;
+  }
+
   findBySession(sessionId: string): Promise<Transcription[]> {
     return this.repo.find({ where: { sessionId }, order: { id: 'ASC' } });
   }

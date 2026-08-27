@@ -134,14 +134,13 @@ export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisco
     session.agreement.reset();   // each committed segment starts fresh
     if (!text) return true;
 
-    const saved = await this.transcriptions.create({
-      sessionId: session.id,
-      text,
-      language,
-      confidence,
-      durationS,
+    // Deliberately not persisted here. The client decides what to keep and
+    // saves it explicitly along with the recording, so nothing lands in the
+    // history unless the user asked for it.
+    this.send(client, {
+      type: 'final',
+      item: { sessionId: session.id, text, language, confidence, durationS },
     });
-    this.send(client, { type: 'final', item: saved });
     return true;
   }
 

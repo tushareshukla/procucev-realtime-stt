@@ -8,6 +8,12 @@ async function json(url, options) {
 
 export const api = {
   listTranscriptions: () => json('/api/transcriptions'),
+  createTranscription: (body) =>
+    json('/api/transcriptions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   updateTranscription: (id, text) =>
     json(`/api/transcriptions/${id}`, {
       method: 'PUT',

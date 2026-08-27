@@ -75,6 +75,7 @@
   .row-main{flex:1;min-width:0}
   .row-text{font-size:15.5px;line-height:1.6;outline:none;border-radius:6px;padding:3px 5px;margin:-3px -5px}
   .row-text:focus{box-shadow:0 0 0 2px var(--acc)}
+  .row-main audio{width:100%;max-width:420px;height:32px;margin-top:10px;display:block}
   .row-meta{display:flex;gap:14px;margin-top:8px;font-size:11.5px;color:var(--dim)}
   .row-acts{display:flex;align-items:flex-start;gap:4px;flex-shrink:0}
   .ibtn{background:none;border:1px solid transparent;color:var(--mut);cursor:pointer;
@@ -154,28 +155,29 @@
   .clip audio{width:100%;height:34px}
   .clip .clip-text{font-size:15px;line-height:1.6}
   .clip .clip-meta{font-size:11.5px;color:var(--dim);display:flex;gap:14px}
+
+  .examples{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .ex{background:var(--panel2);border:1px solid var(--line);color:var(--mut);border-radius:999px;
+      padding:7px 13px;font-size:12.5px;cursor:pointer;transition:.12s}
+  .ex:hover{border-color:var(--acc);color:var(--fg)}
+  .hint{font-size:12.5px;color:var(--dim)}
 </style>
 </head>
 <body>
 
 <header>
-  <span class="brand">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-      <path d="M12 2v20M6 7v10M18 7v10M2 11v2M22 11v2"/>
-    </svg>
-    Speech to Text
-  </span>
+  <span class="brand">procucev</span>
+  <span class="sp"></span>
   <span class="chip">
     <span style="color:var(--mut);font-size:12px">Language</span>
     <select id="lang">
       <option value="en" selected>English</option>
-      <option value="hi">Hindi / Hinglish</option>
+      <option value="hi">Hindi</option>
       <option value="bn">Bengali</option>
       <option value="ta">Tamil</option>
       <option value="te">Telugu</option>
       <option value="mr">Marathi</option>
       <option value="gu">Gujarati</option>
-      <option value="ur">Urdu</option>
       <option value="es">Spanish</option>
       <option value="fr">French</option>
       <option value="de">German</option>
@@ -184,16 +186,15 @@
       <option value="ar">Arabic</option>
     </select>
   </span>
-  <span class="sp"></span>
 </header>
 
 <main>
   <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="stt" role="tab">Speech to Text</button>
-    <button class="tab" data-tab="tts" role="tab">Text to Speech</button>
+    <button class="tab active" data-tab="tts" role="tab">Text to Speech</button>
+    <button class="tab" data-tab="stt" role="tab">Speech to Text</button>
   </nav>
 
-  <section id="panel-stt" class="panel">
+  <section id="panel-stt" class="panel" hidden>
   <section class="stage">
     <canvas class="wave" id="wave"></canvas>
     <div class="stage-body">
@@ -207,27 +208,29 @@
       <div id="lastClip"></div>
       <div class="controls">
         <button class="rec" id="rec"><span class="ico"></span><span id="recLabel">Record</span></button>
-        <span style="font-size:12.5px;color:var(--dim)" id="hint">Audio is only sent while you're speaking.</span>
+        <button class="ghost" id="save" hidden>Save</button>
+        <button class="ghost" id="discard" hidden>Discard</button>
+        <span class="hint" id="hint">Audio is only sent while you're speaking.</span>
       </div>
     </div>
   </section>
 
   <div class="sec">
-    <h2>Transcription history</h2>
+    <h2>Saved recordings</h2>
     <span class="count" id="count">0</span>
   </div>
   <div id="rows"></div>
   <div class="empty" id="empty">Nothing recorded yet.</div>
   </section>
 
-  <section id="panel-tts" class="panel" hidden>
+  <section id="panel-tts" class="panel">
     <div class="stage">
       <div class="stage-body">
-        <div class="status"><span id="ttsStat">Type something to synthesise</span></div>
-        <textarea id="ttsText" rows="5" placeholder="Type or paste text here, then press Speak…"></textarea>
+        <textarea id="ttsText" rows="4" placeholder="Write something to say…"></textarea>
+        <div class="examples" id="ttsExamples"></div>
         <div class="controls">
-          <button class="rec" id="ttsGo"><span class="ico"></span><span>Speak</span></button>
-          <span style="font-size:12.5px;color:var(--dim)">Audio streams back as each sentence is synthesised.</span>
+          <button class="rec" id="ttsGo"><span class="ico"></span><span>Done</span></button>
+          <span class="hint" id="ttsStat">Audio plays as each sentence is ready.</span>
         </div>
       </div>
     </div>
