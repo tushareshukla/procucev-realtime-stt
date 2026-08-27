@@ -13,7 +13,7 @@
 import express from 'express';
 import { GoogleAuth } from 'google-auth-library';
 import { toBcp47 } from './languages.js';
-import { synthesize, listVoices, engineFor } from './tts.js';
+import { synthesize, synthesizeStream, listVoices, engineFor } from './tts.js';
 
 const ENGINE = (process.env.STT_ENGINE ?? 'chirp').toLowerCase();
 const PORT = Number(process.env.PORT ?? 8080);
@@ -188,6 +188,30 @@ app.post('/speak', express.json({ limit: '256kb' }), async (req, res) => {
   } catch (err) {
     console.error('speak failed:', err.message);
     res.status(502).json({ error: err.message });
+  }
+});
+
+/**
+ * Streaming TTS. Emits length-prefixed WAV chunks so the client can start
+ * playing the first sentence while later ones are still being synthesised.
+ * Framing: 4-byte big-endian length, then that many bytes of WAV.
+ */
+app.post('/speak/stream', express.json({ limit: '256kb' }), async (req, res) => {
+  const { text, language = 'en', voice, speed } = req.body ?? {};
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('X-TTS-Engine', engineFor(language));
+  try {
+    for await (const wav of synthesizeStream({ text, language, voice, speed: Number(speed) || 1 })) {
+      const header = Buffer.alloc(4);
+      header.writeUInt32BE(wav.length, 0);
+      res.write(header);
+      res.write(wav);
+    }
+    res.end();
+  } catch (err) {
+    console.error('speak/stream failed:', err.message);
+    if (!res.headersSent) res.status(502).json({ error: err.message });
+    else res.end();
   }
 });
 

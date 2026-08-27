@@ -53,6 +53,8 @@
   .timer{margin-left:auto;font-variant-numeric:tabular-nums;letter-spacing:.04em;color:var(--dim)}
   .live-text{font-size:20px;line-height:1.6;min-height:64px;font-weight:400}
   .live-text .ph{color:var(--dim);font-size:15px}
+  .live-text .settled{color:var(--fg)}
+  .live-text .draft{color:var(--mut);opacity:.75}
   .controls{display:flex;align-items:center;gap:12px;margin-top:22px;
             padding-top:18px;border-top:1px solid var(--line)}
   .rec{display:inline-flex;align-items:center;gap:9px;background:var(--acc);border:none;
@@ -138,6 +140,20 @@
   .arow button{background:none;border:none;color:var(--mut);cursor:pointer;padding:4px 6px;
                border-radius:5px;font-size:12px}
   .arow button:hover{background:var(--panel2);color:var(--fg)}
+
+  .tabs{display:flex;gap:4px;margin-bottom:22px;border-bottom:1px solid var(--line)}
+  .tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--mut);
+       font:inherit;font-size:14px;padding:10px 16px;cursor:pointer;margin-bottom:-1px}
+  .tab:hover{color:var(--fg)}
+  .tab.active{color:var(--fg);border-bottom-color:var(--acc);font-weight:600}
+  .panel[hidden]{display:none}
+  #ttsText{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+           border-radius:10px;padding:14px;font:inherit;font-size:15px;resize:vertical;outline:none}
+  #ttsText:focus{border-color:var(--acc)}
+  .clip{display:flex;flex-direction:column;gap:10px;padding:16px 0;border-top:1px solid var(--line)}
+  .clip audio{width:100%;height:34px}
+  .clip .clip-text{font-size:15px;line-height:1.6}
+  .clip .clip-meta{font-size:11.5px;color:var(--dim);display:flex;gap:14px}
 </style>
 </head>
 <body>
@@ -172,6 +188,12 @@
 </header>
 
 <main>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="stt" role="tab">Speech to Text</button>
+    <button class="tab" data-tab="tts" role="tab">Text to Speech</button>
+  </nav>
+
+  <section id="panel-stt" class="panel">
   <section class="stage">
     <canvas class="wave" id="wave"></canvas>
     <div class="stage-body">
@@ -182,6 +204,7 @@
         <span class="timer" id="timer">0:00</span>
       </div>
       <div class="live-text" id="live"><span class="ph">Press Record and start speaking.</span></div>
+      <div id="lastClip"></div>
       <div class="controls">
         <button class="rec" id="rec"><span class="ico"></span><span id="recLabel">Record</span></button>
         <span style="font-size:12.5px;color:var(--dim)" id="hint">Audio is only sent while you're speaking.</span>
@@ -195,6 +218,23 @@
   </div>
   <div id="rows"></div>
   <div class="empty" id="empty">Nothing recorded yet.</div>
+  </section>
+
+  <section id="panel-tts" class="panel" hidden>
+    <div class="stage">
+      <div class="stage-body">
+        <div class="status"><span id="ttsStat">Type something to synthesise</span></div>
+        <textarea id="ttsText" rows="5" placeholder="Type or paste text here, then press Speak…"></textarea>
+        <div class="controls">
+          <button class="rec" id="ttsGo"><span class="ico"></span><span>Speak</span></button>
+          <span style="font-size:12.5px;color:var(--dim)">Audio streams back as each sentence is synthesised.</span>
+        </div>
+      </div>
+    </div>
+    <div class="sec"><h2>Generated audio</h2></div>
+    <div id="ttsOut"></div>
+    <div class="empty" id="ttsEmpty">Nothing generated yet.</div>
+  </section>
 
   <section class="voice" id="voice">
     <div class="vhead" id="vhead">

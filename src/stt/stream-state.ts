@@ -56,6 +56,19 @@ export class StreamState {
   }
 
   /**
+   * The most recent `seconds` of audio.
+   *
+   * Partials re-transcribe the buffer on every refresh, so transcribing the
+   * whole thing makes each partial cost more as the utterance grows — latency
+   * climbs until partials arrive stale. Bounding the window keeps partial cost
+   * constant; the final commit still uses the complete buffer.
+   */
+  tail(seconds: number): Float32Array {
+    const n = Math.floor(seconds * SAMPLE_RATE);
+    return this.buffer.length > n ? this.buffer.slice(-n) : this.buffer;
+  }
+
+  /**
    * Whether the window holds any speech. Partials on a silent window cost a
    * full inference call and can only ever return noise, so callers skip them.
    */

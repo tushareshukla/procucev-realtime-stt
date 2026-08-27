@@ -27,6 +27,21 @@ export class TtsController {
     return this.tts.listVoices(language);
   }
 
+  @Post('stream')
+  async stream(@Body() dto: SpeakDto, @Res() res: Response) {
+    const upstream = await this.tts.speakStream({
+      text: dto.text,
+      language: dto.language ?? 'en',
+      voice: dto.voice,
+      speed: dto.speed ?? 1,
+    });
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Cache-Control', 'no-store');
+    // Chunked passthrough: the first sentence reaches the browser while later
+    // ones are still being synthesised.
+    upstream.pipe(res);
+  }
+
   @Post('speak')
   async speak(@Body() dto: SpeakDto, @Res() res: Response) {
     const wav = await this.tts.speak({

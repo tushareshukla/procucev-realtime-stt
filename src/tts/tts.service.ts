@@ -41,6 +41,30 @@ export class TtsService {
     }
   }
 
+  /**
+   * Streaming synthesis. Returns the upstream body so the caller can pipe it
+   * straight through — buffering here would defeat the point of streaming.
+   */
+  async speakStream(body: {
+    text: string;
+    language?: string;
+    voice?: string;
+    speed?: number;
+  }): Promise<NodeJS.ReadableStream> {
+    this.assertConfigured();
+    const res = await fetch(`${STT_SERVICE_URL}/speak/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok || !res.body) {
+      const detail = await res.text().catch(() => '');
+      throw new ServiceUnavailableException(`tts stream failed: ${res.status} ${detail.slice(0, 200)}`);
+    }
+    return res.body as unknown as NodeJS.ReadableStream;
+  }
+
   async speak(body: {
     text: string;
     language?: string;

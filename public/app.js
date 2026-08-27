@@ -1,4 +1,5 @@
 import { api } from './js/api.js';
+import { pcmChunksToWavBlob, readWavStream } from './js/wav.js';
 
 'use strict';
 const $ = (id) => document.getElementById(id);
@@ -20,6 +21,7 @@ const TAIL_FRAMES = 12;         // ~1s of audio kept after speech stops
 const PREROLL_FRAMES = 8;       // ~700ms captured before speech is detected
 
 let ws, ctx, node, stream, analyser, rafId, startedAt;
+let recordedChunks = [];   // PCM16 frames sent this session, for local playback
 let level = 0;   // live input RMS, surfaced in the UI
 let recording = false, sessionId = null;
 
@@ -116,7 +118,25 @@ async function start() {
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.type === 'session') sessionId = m.sessionId;
-    if (m.type === 'partial') $('live').textContent = m.text;
+    if (m.type === 'partial') {
+      // Settled words render solid; the still-changing tail renders dimmed, so
+      // you can see the transcript firming up left-to-right as you speak.
+      const live = $('live');
+      live.innerHTML = '';
+      if (m.committed) {
+        const c = document.createElement('span');
+        c.className = 'settled';
+        c.textContent = m.committed + ' ';
+        live.appendChild(c);
+      }
+      if (m.tentative) {
+        const t = document.createElement('span');
+        t.className = 'draft';
+        t.textContent = m.tentative;
+        live.appendChild(t);
+      }
+      if (!m.committed && !m.tentative) live.textContent = m.text || '';
+    }
     if (m.type === 'final') { $('live').textContent = ''; load(); }
   };
   ws.onclose = () => { if (recording) stop(); };
@@ -161,9 +181,9 @@ async function start() {
       if (calibrationFrames === framesToCalibrate) {
         threshold = Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, noiseFloor * TRIGGER_MULTIPLE));
         console.info(`[vad] noise floor ${noiseFloor.toFixed(5)} → threshold ${threshold.toFixed(5)}`);
-        setStat('Listening', 'live');
+        setStat('Waiting for speech', 'live');
       } else {
-        setStat('Calibrating mic…', 'live');
+        setStat('Checking your mic…', 'live');
       }
       preRoll.push(toPCM16(frame, ctx.sampleRate));
       if (preRoll.length > PREROLL_FRAMES) preRoll.shift();
@@ -177,22 +197,26 @@ async function start() {
         speaking = true; sawSpeech = true;
         for (const b of preRoll) ws.send(b);   // don't clip the first syllable
         preRoll.length = 0;
-        setStat('Speaking', 'speech');
+        setStat('Hearing you', 'speech');
       }
       quiet = 0;
-      ws.send(toPCM16(frame, ctx.sampleRate));
+      const pcm = toPCM16(frame, ctx.sampleRate);
+      recordedChunks.push(pcm);
+      ws.send(pcm);
       return;
     }
     if (speaking) {
       quiet++;
-      ws.send(toPCM16(frame, ctx.sampleRate));   // let the server VAD commit
-      if (quiet > TAIL_FRAMES) { speaking = false; quiet = 0; setStat('Listening', 'live'); }
+      const pcm = toPCM16(frame, ctx.sampleRate);
+      recordedChunks.push(pcm);
+      ws.send(pcm);   // let the server VAD commit
+      if (quiet > TAIL_FRAMES) { speaking = false; quiet = 0; setStat('Waiting for speech', 'live'); }
       return;
     }
 
     // Nothing has ever tripped the gate — say so instead of sitting silent.
     if (!sawSpeech && framesSinceStart > framesToCalibrate + 90) {
-      setStat('No speech detected — check mic input', 'live');
+      setStat('No sound reaching the mic', 'live');
     }
 
     preRoll.push(toPCM16(frame, ctx.sampleRate));
@@ -206,9 +230,9 @@ async function start() {
   sink.gain.value = 0;
   node.connect(sink); sink.connect(ctx.destination);
 
-  recording = true; startedAt = Date.now();
+  recording = true; startedAt = Date.now(); recordedChunks = [];
   $('rec').classList.add('on'); $('recLabel').textContent = 'Stop';
-  setStat('Listening', 'live');
+  setStat('Waiting for speech', 'live');
   tick(); drawWave();
 }
 
@@ -220,7 +244,12 @@ function stop() {
   cancelAnimationFrame(rafId);
   node?.disconnect(); analyser = null; ctx?.close();
   stream?.getTracks().forEach((t) => t.stop());
-  setTimeout(() => { try { ws.close(); } catch {} load(); }, 1200);
+  const captured = recordedChunks.slice();
+  setTimeout(async () => {
+    try { ws.close(); } catch {}
+    await load();
+    if (captured.length) showRecording(pcmChunksToWavBlob(captured, 16000));
+  }, 1400);
   $('rec').classList.remove('on'); $('recLabel').textContent = 'Record';
   setStat('Idle'); drawWave();
 }
@@ -297,6 +326,20 @@ $('vhead').onclick = () => $('voice').classList.toggle('open');
 $('lang').addEventListener('change', loadVoices);
 loadVoices();
 
+/** Put the just-finished recording under the live panel, with its transcript. */
+function showRecording(blob) {
+  const holder = $('lastClip');
+  if (!holder) return;
+  holder.innerHTML = '';
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.src = URL.createObjectURL(blob);
+  const label = document.createElement('div');
+  label.className = 'clip-meta';
+  label.textContent = 'Your recording';
+  holder.append(label, audio);
+}
+
 // ── history + CRUD ───────────────────────────────────────────────────────────
 let items = [];
 
@@ -342,3 +385,97 @@ $('rows').addEventListener('click', async (e) => {
 addEventListener('resize', drawWave);
 drawWave();
 load();
+
+// ── tabs ─────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b === btn));
+    const want = btn.dataset.tab;
+    document.querySelectorAll('.panel').forEach((p) => {
+      p.hidden = p.id !== `panel-${want}`;
+    });
+    if (want === 'tts') loadVoices();
+  };
+});
+
+// ── text to speech tab ───────────────────────────────────────────────────────
+// Plays each sentence as it arrives rather than waiting for the whole passage.
+let ttsQueue = [], ttsPlaying = false;
+
+function enqueue(blob) {
+  ttsQueue.push(blob);
+  if (!ttsPlaying) playNext();
+}
+
+function playNext() {
+  const blob = ttsQueue.shift();
+  if (!blob) { ttsPlaying = false; return; }
+  ttsPlaying = true;
+  const a = new Audio(URL.createObjectURL(blob));
+  a.onended = a.onerror = playNext;
+  a.play().catch(() => playNext());
+}
+
+$('ttsGo').onclick = async () => {
+  const text = $('ttsText').value.trim();
+  if (!text) return;
+
+  const go = $('ttsGo');
+  go.disabled = true;
+  $('ttsStat').textContent = 'Synthesising…';
+  ttsQueue = []; ttsPlaying = false;
+
+  const started = Date.now();
+  let chunks = 0;
+  const parts = [];
+
+  try {
+    const res = await fetch('/api/tts/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        language: $('lang').value,
+        voice: $('vsel').value || undefined,
+        speed: Number($('vrate').value) || 1,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    for await (const blob of readWavStream(res)) {
+      chunks++;
+      if (chunks === 1) $('ttsStat').textContent = `Playing — first audio in ${((Date.now() - started) / 1000).toFixed(1)}s`;
+      parts.push(blob);
+      enqueue(blob);
+    }
+
+    if (!chunks) throw new Error('no audio returned');
+    $('ttsStat').textContent = `Done — ${chunks} segment${chunks > 1 ? 's' : ''} in ${((Date.now() - started) / 1000).toFixed(1)}s`;
+    addGenerated(new Blob(parts, { type: 'audio/wav' }), text, chunks);
+  } catch (err) {
+    $('ttsStat').textContent = `Failed: ${err.message}`;
+  } finally {
+    go.disabled = false;
+  }
+};
+
+function addGenerated(blob, text, chunks) {
+  $('ttsEmpty').style.display = 'none';
+  const row = document.createElement('div');
+  row.className = 'clip';
+
+  const t = document.createElement('div');
+  t.className = 'clip-text';
+  t.textContent = text;
+
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.src = URL.createObjectURL(blob);
+
+  const meta = document.createElement('div');
+  meta.className = 'clip-meta';
+  meta.innerHTML = `<span>${esc($('lang').value)}</span><span>${esc($('vsel').value || 'default voice')}</span><span>${chunks} segment${chunks > 1 ? 's' : ''}</span>`;
+
+  row.append(t, audio, meta);
+  $('ttsOut').prepend(row);
+}

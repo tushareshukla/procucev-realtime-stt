@@ -119,6 +119,47 @@ export async function synthesize({ text, language = 'en', voice, speed = 1 }) {
   return { audio, engine };
 }
 
+/**
+ * Streaming synthesis: yields WAV chunks as each sentence is synthesised
+ * instead of waiting for the whole passage. Playback can start on the first
+ * chunk, which is the difference between "instant" and "waits then speaks".
+ */
+export async function* synthesizeStream({ text, language = 'en', voice, speed = 1 }) {
+  if (!text?.trim()) throw new Error('empty text');
+
+  if (engineFor(language) === 'kokoro') {
+    if (!kokoro) await loadKokoro();
+    const chosen = voice && kokoro.voices[voice] ? voice : DEFAULT_KOKORO_VOICE;
+
+    // Passing a plain string to kokoro.stream() hangs: it builds an internal
+    // TextSplitterStream and never closes it, so the iterator waits forever for
+    // more input. Drive the splitter ourselves and close it explicitly.
+    const { TextSplitterStream } = await import('kokoro-js');
+    const splitter = new TextSplitterStream();
+    // Push with separators intact so its own sentence detection can fire;
+    // pushing pre-split fragments concatenates them into one utterance.
+    splitter.push(text);
+    splitter.close();
+
+    for await (const { audio } of kokoro.stream(splitter, { voice: chosen, speed })) {
+      yield floatToPcm16Wav(audio.audio, audio.sampling_rate);
+    }
+    return;
+  }
+
+  // Piper has no sentence-stream API, so split and synthesise per sentence.
+  for (const sentence of splitSentences(text)) {
+    yield await speakPiper(sentence, voice || defaultPiperVoice(language), speed);
+  }
+}
+
+function splitSentences(text) {
+  return text
+    .split(/(?<=[.!?।])\s+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
 function defaultPiperVoice(language) {
   const lang = String(language).toLowerCase().slice(0, 2);
   if (!fs.existsSync(PIPER_VOICE_DIR)) return `${lang}_IN`;

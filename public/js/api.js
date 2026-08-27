@@ -26,6 +26,14 @@ export const api = {
 
   listVoices: (language) => json(`/api/tts/voices?language=${encodeURIComponent(language)}`),
 
+  /** Streaming synthesis — returns the raw Response for readWavStream(). */
+  speakStream: (body) =>
+    fetch('/api/tts/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
   /** Returns a WAV blob synthesised by the open-source TTS models. */
   async speak({ text, language, voice, speed }) {
     const res = await fetch('/api/tts/speak', {

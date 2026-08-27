@@ -7,10 +7,13 @@ import {
 import { randomUUID } from 'crypto';
 import type { WebSocket } from 'ws';
 import { DEFAULT_LANGUAGE, SttService } from '../stt/stt.service';
+import { LocalAgreement } from '../stt/local-agreement';
 import { StreamState, SAMPLE_RATE } from '../stt/stream-state';
 import { TranscriptionService } from './transcription.service';
 
 const REFRESH_MS = Number(process.env.REFRESH_MS ?? 900);
+/** Partials only look at the recent tail, so their cost stays constant. */
+const PARTIAL_WINDOW_S = Number(process.env.PARTIAL_WINDOW_S ?? 8);
 
 interface Session {
   id: string;
@@ -19,6 +22,8 @@ interface Session {
   busy: boolean;
   /** Whisper needs an explicit language; the client may override the default. */
   language: string;
+  /** Stabilises partials so displayed text settles instead of flickering. */
+  agreement: LocalAgreement;
 }
 
 @WebSocketGateway({ path: '/ws/transcribe' })
@@ -39,6 +44,7 @@ export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisco
       bytesSinceRefresh: 0,
       busy: false,
       language: DEFAULT_LANGUAGE,
+      agreement: new LocalAgreement(),
     };
     this.sessions.set(client, session);
 
@@ -101,8 +107,16 @@ export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisco
       session.bytesSinceRefresh = 0;
       session.busy = true;
       try {
-        const { text } = await this.stt.transcribe(session.state.audio, session.language);
-        if (text) this.send(client, { type: 'partial', text });
+        const { text } = await this.stt.transcribe(
+          session.state.tail(PARTIAL_WINDOW_S),
+          session.language,
+        );
+        if (text) {
+          // Emit the stable prefix separately from the still-changing tail so
+          // the UI can render settled text differently from in-flight text.
+          const { committed, tentative } = session.agreement.update(text);
+          this.send(client, { type: 'partial', text, committed, tentative });
+        }
       } finally {
         session.busy = false;
       }
@@ -117,6 +131,7 @@ export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisco
     session.bytesSinceRefresh = 0;
 
     const { text, language, confidence } = await this.stt.transcribe(audio, session.language);
+    session.agreement.reset();   // each committed segment starts fresh
     if (!text) return true;
 
     const saved = await this.transcriptions.create({
