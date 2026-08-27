@@ -7,7 +7,8 @@ async function json(url, options) {
 }
 
 export const api = {
-  listTranscriptions: () => json('/api/transcriptions'),
+  listTranscriptions: (user) =>
+    json(`/api/transcriptions${user ? `?user=${encodeURIComponent(user)}` : ''}`),
   createTranscription: (body) =>
     json('/api/transcriptions', {
       method: 'POST',
@@ -29,8 +30,6 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt }),
     }),
-
-  listVoices: (language) => json(`/api/tts/voices?language=${encodeURIComponent(language)}`),
 
   /** Streaming synthesis — returns the raw Response for readWavStream(). */
   speakStream: (body) =>

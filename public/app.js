@@ -1,6 +1,7 @@
 import { api } from './js/api.js?v=__BUILD__';
 import { pcmChunksToWavBlob, readWavStream } from './js/wav.js?v=__BUILD__';
 import { getLanguage, setLanguage, onLanguageChange, detectLanguage } from './js/lang.js?v=__BUILD__';
+import { ensureUser, getUser } from './js/user.js?v=__BUILD__';
 
 'use strict';
 const $ = (id) => document.getElementById(id);
@@ -276,29 +277,11 @@ $('lang').onchange = () => {
 };
 
 // ── text to speech ───────────────────────────────────────────────────────────
-// Audio comes from the open-source models running in our own inference
-// service: Kokoro-82M (Apache-2.0) for English, Piper (MIT) for Hindi and
-// other languages. Deliberately not the browser's built-in voices, which are
-// proprietary and vary by operating system.
-let voices = [], playingId = null, audioEl = null;
-
-async function loadVoices() {
-  const lang = getLanguage();
-  try {
-    const { voices: list, engine } = await api.listVoices(lang);
-    voices = list || [];
-    $('vsel').innerHTML = voices
-      .map((v) => `<option value="${esc(v.id)}">${esc(v.name || v.id)}${v.gender ? ' · ' + esc(v.gender) : ''}</option>`)
-      .join('');
-    $('vnote').textContent = voices.length
-      ? `${voices.length} voices via ${engine} (open source), synthesised server-side.`
-      : `No voices available for "${lang}" yet.`;
-    $('voice').classList.toggle('hidden', !voices.length);
-  } catch {
-    $('vnote').textContent = 'Voice list unavailable.';
-    $('voice').classList.add('hidden');
-  }
-}
+// Audio comes from the open-source models in our own inference service:
+// Kokoro-82M (Apache-2.0) for English, Piper (MIT) for Hindi and others.
+// Voice and speed are left to the service defaults — the picker was removed —
+// so the language, inferred from the text, is the only thing that selects one.
+let playingId = null, audioEl = null;
 
 async function speak(text, id, btn) {
   if (playingId === id) return stopSpeaking(btn);
@@ -308,12 +291,7 @@ async function speak(text, id, btn) {
   btn.classList.add('on');
   btn.textContent = '⋯';
   try {
-    const blob = await api.speak({
-      text,
-      language: getLanguage(),
-      voice: $('vsel').value || undefined,
-      speed: Number($('vrate').value) || 1,
-    });
+    const blob = await api.speak({ text, language: detectLanguage(text, getLanguage()) });
     if (playingId !== id) return;                 // superseded while synthesising
     audioEl = new Audio(URL.createObjectURL(blob));
     audioEl.onended = audioEl.onerror = () => stopSpeaking(btn);
@@ -321,7 +299,6 @@ async function speak(text, id, btn) {
     await audioEl.play();
   } catch (err) {
     console.error('[tts]', err);
-    $('vnote').textContent = `Playback failed: ${err.message}`;
     stopSpeaking(btn);
   }
 }
@@ -335,73 +312,6 @@ function stopSpeaking(btn) {
   });
   if (btn) { btn.classList.remove('on'); btn.textContent = '▶'; }
 }
-
-$('vrate').oninput = (e) => ($('vrateV').textContent = (+e.target.value).toFixed(1) + '×');
-$('vhead').onclick = () => $('voice').classList.toggle('open');
-loadVoices();
-
-/** Holds the finished recording until the user decides to keep it. */
-let pending = null;
-
-function showRecording(blob) {
-  const holder = $('lastClip');
-  if (!holder) return;
-  holder.innerHTML = '';
-  holder.className = 'clip';
-
-  const audio = document.createElement('audio');
-  audio.controls = true;
-  audio.src = URL.createObjectURL(blob);
-
-  const label = document.createElement('div');
-  label.className = 'clip-meta';
-  label.textContent = pending?.text ? 'Review, then Save to keep it' : 'No speech was transcribed';
-
-  holder.append(label, audio);
-  $('save').hidden = !pending?.text;
-  $('discard').hidden = false;
-}
-
-function clearPending() {
-  pending = null;
-  $('lastClip').innerHTML = '';
-  $('lastClip').className = '';
-  $('live').innerHTML = '<span class="ph">Press Record and start speaking.</span>';
-  $('save').hidden = true;
-  $('discard').hidden = true;
-}
-
-const blobToBase64 = (blob) => new Promise((resolve, reject) => {
-  const r = new FileReader();
-  r.onload = () => resolve(String(r.result).split(',')[1]);
-  r.onerror = reject;
-  r.readAsDataURL(blob);
-});
-
-$('discard').onclick = clearPending;
-
-$('save').onclick = async () => {
-  if (!pending?.text) return;
-  const btn = $('save');
-  btn.disabled = true;
-  btn.textContent = 'Saving…';
-  try {
-    await api.createTranscription({
-      text: pending.text,
-      language: pending.language || $('sttLang').value,
-      durationS: pending.durationS || 0,
-      sessionId: pending.sessionId,
-      audioBase64: pending.blob ? await blobToBase64(pending.blob) : undefined,
-    });
-    clearPending();
-    await load();
-  } catch (err) {
-    $('hint').textContent = `Save failed: ${err.message}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Save';
-  }
-};
 
 // ── history + CRUD ───────────────────────────────────────────────────────────
 let items = [];
@@ -448,7 +358,30 @@ $('rows').addEventListener('click', async (e) => {
 // Refresh and Copy controls were removed as redundant.
 addEventListener('resize', drawWave);
 drawWave();
-load();
+
+function showWho(name) {
+  const el = $('who');
+  el.innerHTML = `Signed in as <b>${esc(name)}</b>`;
+  el.hidden = false;
+}
+
+// Nothing is loaded until we know whose history to show.
+ensureUser({
+  onPrompt: (done) => {
+    $('ask').hidden = false;
+    $('askName').focus();
+    $('askForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = $('askName').value.trim();
+      if (!name) return;
+      $('ask').hidden = true;
+      done(name);
+    });
+  },
+}).then((name) => {
+  showWho(name);
+  load();
+});
 
 // ── example prompts ──────────────────────────────────────────────────────────
 const EXAMPLES = [
@@ -491,7 +424,7 @@ renderExamples();
 
 // Typed input picks its language from the script it is written in.
 $('ttsText').addEventListener('input', (e) => setLanguage(detectLanguage(e.target.value)));
-onLanguageChange(() => loadVoices());
+
 
 // ── tabs ─────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach((btn) => {
@@ -501,7 +434,7 @@ document.querySelectorAll('.tab').forEach((btn) => {
     document.querySelectorAll('.panel').forEach((p) => {
       p.hidden = p.id !== `panel-${want}`;
     });
-    if (want === 'tts') loadVoices();
+
   };
 });
 
@@ -543,8 +476,6 @@ $('ttsGo').onclick = async () => {
       body: JSON.stringify({
         text,
         language: getLanguage(),
-        voice: $('vsel').value || undefined,
-        speed: Number($('vrate').value) || 1,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -558,13 +489,31 @@ $('ttsGo').onclick = async () => {
 
     if (!chunks) throw new Error('no audio returned');
     $('ttsStat').textContent = `Done — ${chunks} segment${chunks > 1 ? 's' : ''} in ${((Date.now() - started) / 1000).toFixed(1)}s`;
-    addGenerated(new Blob(parts, { type: 'audio/wav' }), text, chunks);
+    const full = new Blob(parts, { type: 'audio/wav' });
+    addGenerated(full, text, chunks);
+    persistGenerated(full, text);
   } catch (err) {
     $('ttsStat').textContent = `Failed: ${err.message}`;
   } finally {
     go.disabled = false;
   }
 };
+
+async function persistGenerated(blob, text) {
+  try {
+    await api.createTranscription({
+      text,
+      language: getLanguage(),
+      durationS: 0,
+      sessionId: 'tts',
+      userName: getUser(),
+      kind: 'tts',
+      audioBase64: await blobToBase64(blob),
+    });
+  } catch (err) {
+    console.warn('[tts] could not save generated audio:', err.message);
+  }
+}
 
 function addGenerated(blob, text, chunks) {
   $('ttsEmpty').style.display = 'none';
@@ -581,7 +530,7 @@ function addGenerated(blob, text, chunks) {
 
   const meta = document.createElement('div');
   meta.className = 'clip-meta';
-  meta.innerHTML = `<span>${esc(getLanguage())}</span><span>${esc($('vsel').value || 'default voice')}</span><span>${chunks} segment${chunks > 1 ? 's' : ''}</span>`;
+  meta.innerHTML = `<span>${esc(getLanguage())}</span><span>${chunks} segment${chunks > 1 ? 's' : ''}</span>`;
 
   row.append(t, audio, meta);
   $('ttsOut').prepend(row);

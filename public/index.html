@@ -85,27 +85,6 @@
   .ibtn.danger:hover{color:var(--red)}
   .empty{text-align:center;color:var(--dim);padding:44px 0;font-size:14px}
 
-  /* ── voice / tone panel ──────────────────────────────────────────────── */
-  .voice{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
-         padding:18px 20px;margin-top:26px}
-  .voice.hidden{display:none}
-  .vhead{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
-  .vhead h3{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);
-            font-weight:500;margin:0}
-  .vhead .caret{margin-left:auto;color:var(--dim);transition:transform .18s}
-  .voice.open .caret{transform:rotate(180deg)}
-  .vbody{display:none;gap:18px;margin-top:18px;flex-wrap:wrap}
-  .voice.open .vbody{display:flex}
-  .field{display:flex;flex-direction:column;gap:7px;min-width:180px;flex:1}
-  .field label{font-size:11.5px;color:var(--mut);display:flex;justify-content:space-between}
-  .field select,.field input[type=range]{width:100%}
-  .field select{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
-                border-radius:8px;padding:8px 10px;font:inherit;font-size:13.5px;outline:none}
-  input[type=range]{-webkit-appearance:none;height:4px;border-radius:2px;background:var(--line);outline:none}
-  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
-    border-radius:50%;background:var(--acc);cursor:pointer;border:2px solid var(--panel)}
-  .vnote{width:100%;font-size:11.5px;color:var(--dim);margin-top:4px}
-
   /* ── agent widget ────────────────────────────────────────────────────── */
   #fab{position:fixed;right:24px;bottom:24px;width:50px;height:50px;border-radius:50%;
        display:grid;place-items:center;background:var(--acc);border:none;color:#fff;
@@ -165,13 +144,39 @@
            border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;outline:none}
   .ex .tag{display:inline-block;margin-right:7px;padding:1px 6px;border-radius:4px;
            background:var(--line);color:var(--mut);font-size:10.5px;text-transform:uppercase}
+
+  .who{font-size:13px;color:var(--mut)}
+  .who b{color:var(--fg);font-weight:600}
+  .ask{position:fixed;inset:0;background:rgba(6,8,12,.86);backdrop-filter:blur(6px);
+       display:grid;place-items:center;z-index:100}
+  .ask[hidden]{display:none}
+  .ask-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+            padding:30px;width:min(420px,calc(100vw - 40px));display:flex;
+            flex-direction:column;gap:14px;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+  .ask-card h2{margin:0;font-size:19px;letter-spacing:-.01em}
+  .ask-card p{margin:0;font-size:13.5px;color:var(--mut);line-height:1.5}
+  .ask-card input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+                  border-radius:10px;padding:12px 14px;font:inherit;font-size:15px;outline:none}
+  .ask-card input:focus{border-color:var(--acc)}
+  .ask-card button{align-self:flex-start;margin-top:4px}
 </style>
 </head>
 <body>
 
 <header>
   <span class="brand">procucev</span>
+  <span class="sp"></span>
+  <span class="who" id="who" hidden></span>
 </header>
+
+<div class="ask" id="ask" hidden>
+  <form class="ask-card" id="askForm">
+    <h2>What's your name?</h2>
+    <p>Your recordings and generated audio are saved under this name.</p>
+    <input id="askName" type="text" maxlength="80" placeholder="Your name" autocomplete="name" required>
+    <button type="submit" class="rec"><span class="ico"></span><span>Continue</span></button>
+  </form>
+</div>
 
 <main>
   <nav class="tabs" role="tablist">
@@ -239,23 +244,6 @@
     <div class="empty" id="ttsEmpty">Nothing generated yet.</div>
   </section>
 
-  <section class="voice" id="voice">
-    <div class="vhead" id="vhead">
-      <h3>Playback voice &amp; tone</h3>
-      <span class="caret">▾</span>
-    </div>
-    <div class="vbody">
-      <div class="field">
-        <label for="vsel">Voice</label>
-        <select id="vsel"></select>
-      </div>
-      <div class="field">
-        <label for="vrate">Speed <span id="vrateV">1.0×</span></label>
-        <input type="range" id="vrate" min="0.5" max="2" step="0.1" value="1">
-      </div>
-      <div class="vnote" id="vnote"></div>
-    </div>
-  </section>
 </main>
 
 

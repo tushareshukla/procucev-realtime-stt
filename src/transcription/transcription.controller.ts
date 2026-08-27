@@ -2,7 +2,7 @@ import {
   Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Put, Query, Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
 import { TranscriptionService } from './transcription.service';
 
 class UpdateTranscriptionDto {
@@ -24,6 +24,12 @@ class CreateTranscriptionDto {
   @IsOptional() @IsString()
   sessionId?: string;
 
+  @IsOptional() @IsString()
+  userName?: string;
+
+  @IsOptional() @IsIn(['stt', 'tts'])
+  kind?: string;
+
   /** Base64 WAV of the recording, saved so it can be replayed later. */
   @IsOptional() @IsString()
   audioBase64?: string;
@@ -34,8 +40,8 @@ export class TranscriptionController {
   constructor(private readonly service: TranscriptionService) {}
 
   @Get()
-  findAll(@Query('limit') limit?: string) {
-    return this.service.findAll(limit ? parseInt(limit, 10) : 100);
+  findAll(@Query('limit') limit?: string, @Query('user') user?: string) {
+    return this.service.findAll(limit ? parseInt(limit, 10) : 100, user || undefined);
   }
 
   @Post()
@@ -46,6 +52,8 @@ export class TranscriptionController {
       language: dto.language ?? '',
       durationS: dto.durationS ?? 0,
       confidence: 1,
+      userName: (dto.userName ?? '').slice(0, 80),
+      kind: dto.kind ?? 'stt',
       audio: dto.audioBase64,
       hasAudio: Boolean(dto.audioBase64),
     });

@@ -14,8 +14,12 @@ export class TranscriptionService {
     return this.repo.save(this.repo.create(data));
   }
 
-  findAll(limit = 100): Promise<Transcription[]> {
-    return this.repo.find({ order: { id: 'DESC' }, take: Math.min(limit, 500) });
+  findAll(limit = 100, userName?: string): Promise<Transcription[]> {
+    return this.repo.find({
+      where: userName ? { userName } : {},
+      order: { id: 'DESC' },
+      take: Math.min(limit, 500),
+    });
   }
 
   async findOne(id: number): Promise<Transcription> {

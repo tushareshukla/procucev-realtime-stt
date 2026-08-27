@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 
 import { HealthController } from './health.controller';
+import { IndexController } from './index.controller';
 import { MastraController } from './mastra/mastra.controller';
 import { MastraService } from './mastra/mastra.service';
 import { SttService } from './stt/stt.service';
@@ -55,7 +56,7 @@ const usePostgres = databaseUrl.startsWith('postgres');
       },
     }),
   ],
-  controllers: [HealthController, TranscriptionController, TtsController, MastraController],
+  controllers: [IndexController, HealthController, TranscriptionController, TtsController, MastraController],
   providers: [TranscriptionService, SttService, TtsService, TranscriptionGateway, MastraService],
 })
 export class AppModule {}

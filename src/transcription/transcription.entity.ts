@@ -9,6 +9,19 @@ export class Transcription {
   @Column({ length: 64 })
   sessionId: string;
 
+  /** Who created this. Collected once in the browser and sent with each save. */
+  @Index()
+  @Column({ length: 80, default: '' })
+  userName: string;
+
+  /**
+   * 'stt' — a recording the user made, transcribed.
+   * 'tts' — text the user typed, synthesised.
+   * Both are kept so a user's whole history is in one place.
+   */
+  @Column({ length: 8, default: 'stt' })
+  kind: string;
+
   @Column({ type: 'text' })
   text: string;
 
