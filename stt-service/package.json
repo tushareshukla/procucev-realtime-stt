@@ -1,0 +1,12 @@
+{
+  "name": "procucev-stt-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Whisper inference service — deployed to Cloud Run, called by the NestJS backend",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "express": "^4.21.2"
+  }
+}

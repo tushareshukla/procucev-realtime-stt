@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.models/
+*.db
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+.omc/
+
+# Tooling / local state — contains session tokens
+.gstack/
+.claude/
+
+# Superseded FastAPI prototype, kept locally only
+_python-prototype/
