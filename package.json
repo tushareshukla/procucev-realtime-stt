@@ -12,7 +12,9 @@
     "test:cov": "jest --coverage",
     "eval": "node evals/run.mjs",
     "test:web": "node --test \"public/js/*.test.mjs\"",
-    "test:all": "jest && npm run test:web"
+    "test:all": "jest && npm run test:web",
+    "eval:tts": "node evals/tts.mjs",
+    "eval:all": "node evals/run.mjs && node evals/tts.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^1.2.22",

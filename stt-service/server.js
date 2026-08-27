@@ -26,6 +26,29 @@ const SPEECH_MODEL = process.env.SPEECH_MODEL ?? 'chirp_2';
 
 /** Below this RMS the window is silence. Both engines hallucinate on silence. */
 const SILENCE_RMS = Number(process.env.SILENCE_RMS ?? 0.005);
+
+/**
+ * Whisper emits a small set of stock phrases when it hears near-silence or
+ * background noise — these are its training-data artifacts, not speech. On a
+ * quiet window they are always hallucinations, so they are dropped.
+ */
+const HALLUCINATIONS = new Set([
+  'you', 'thank you', 'thank you.', 'thanks for watching', 'thanks for watching!',
+  'you.', 'bye', 'bye.', 'bye!', 'oh', 'oh.', 'oh, oh', 'oh, oh.', 'okay', 'okay.',
+  'the', '.', '..', '...', 'um', 'uh', 'hmm', 'mm', 'so', 'yeah', 'yeah.',
+  'please subscribe', 'subtitles by the amara.org community',
+  'शुक्रिया', 'धन्यवाद', 'धन्यवाद।', 'नमस्कार', 'ठीक है।',
+]);
+
+/** Quiet enough that a stock phrase is far more likely noise than speech. */
+const HALLUCINATION_RMS = Number(process.env.HALLUCINATION_RMS ?? 0.02);
+
+function isLikelyHallucination(text, rmsLevel) {
+  if (!text) return false;
+  if (rmsLevel >= HALLUCINATION_RMS) return false;
+  const key = text.toLowerCase().trim().replace(/\s+/g, ' ');
+  return HALLUCINATIONS.has(key);
+}
 const MIN_SECONDS = Number(process.env.MIN_SECONDS ?? 0.3);
 
 const auth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
@@ -157,6 +180,13 @@ app.post('/transcribe', async (req, res) => {
     const { text, confidence } =
       ENGINE === 'whisper' ? await transcribeWhisper(pcm, language)
                            : await transcribeChirp(pcm, language);
+
+    if (isLikelyHallucination(text, level)) {
+      return res.json({
+        text: '', language, confidence: 0, skipped: 'hallucination',
+        engine: ENGINE, ms: Date.now() - started,
+      });
+    }
 
     res.json({ text, language, confidence, engine: ENGINE, ms: Date.now() - started });
   } catch (err) {

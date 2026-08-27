@@ -423,7 +423,7 @@ async function load() {
       </div>
       <div class="row-acts">
         <button class="ibtn play" data-act="play" title="Read aloud with the TTS voice">▶</button>
-        <button class="ibtn" data-act="save" title="Save edit">Save</button>
+        <button class="ibtn" data-act="save" title="Save your edit to this transcript">Update</button>
         <button class="ibtn danger" data-act="del" title="Delete">✕</button>
       </div>
     </div>`).join('');
