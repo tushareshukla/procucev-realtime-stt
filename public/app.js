@@ -272,8 +272,10 @@ function stop() {
 
 $('rec').onclick = () =>
   recording ? stop() : start().catch((e) => { setStat('Mic blocked'); console.error(e); });
-$('lang').onchange = () => {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'config', language: $('sttLang').value }));
+$('sttLang').onchange = () => {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'config', language: $('sttLang').value }));
+  }
 };
 
 // ── text to speech ───────────────────────────────────────────────────────────
