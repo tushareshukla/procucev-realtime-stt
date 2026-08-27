@@ -1,93 +1,160 @@
 /**
- * Whisper inference service.
+ * Speech-to-text inference service.
  *
- * Deployed to Cloud Run and called by the NestJS backend over HTTP. Kept
- * separate so the ~2GB model process scales to zero independently of the API,
- * and never has to share a VM with anything else.
+ * Two engines behind one HTTP contract, selected by STT_ENGINE:
+ *
+ *   chirp   (default) — Google Cloud Speech-to-Text v2, model chirp_2.
+ *                       Mean WER ~2% on the eval fixtures.
+ *   whisper           — self-hosted whisper via transformers.js. No external
+ *                       dependency, but ~115% mean WER on Hindi/Hinglish.
+ *
+ * The NestJS backend calls this and does not care which engine is active.
  */
 import express from 'express';
-import { pipeline, env } from '@huggingface/transformers';
+import { GoogleAuth } from 'google-auth-library';
+import { toBcp47 } from './languages.js';
 
-const MODEL_ID = process.env.WHISPER_MODEL ?? 'Xenova/whisper-small';
-const DTYPE = process.env.WHISPER_DTYPE ?? 'q8';
+const ENGINE = (process.env.STT_ENGINE ?? 'chirp').toLowerCase();
 const PORT = Number(process.env.PORT ?? 8080);
 const SAMPLE_RATE = 16_000;
-/** Below this RMS the window is treated as silence and never sent to Whisper. */
+
+// Chirp 2 is region-bound; us-central1 is where it is published.
+const GCP_PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? '';
+const SPEECH_LOCATION = process.env.SPEECH_LOCATION ?? 'us-central1';
+const SPEECH_MODEL = process.env.SPEECH_MODEL ?? 'chirp_2';
+
+/** Below this RMS the window is silence. Both engines hallucinate on silence. */
 const SILENCE_RMS = Number(process.env.SILENCE_RMS ?? 0.005);
+const MIN_SECONDS = Number(process.env.MIN_SECONDS ?? 0.3);
 
-env.cacheDir = process.env.MODEL_CACHE ?? '/models';
-env.allowLocalModels = true;
+const auth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
+let authClient = null;
 
-let asr = null;
-let loading = null;
-
-function load() {
-  if (!loading) {
-    loading = (async () => {
-      const t0 = Date.now();
-      console.log(`loading ${MODEL_ID} (${DTYPE}) …`);
-      asr = await pipeline('automatic-speech-recognition', MODEL_ID, { dtype: DTYPE });
-      console.log(`model ready in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-    })();
-  }
-  return loading;
+async function accessToken() {
+  authClient ??= await auth.getClient();
+  const { token } = await authClient.getAccessToken();
+  return token;
 }
 
+// ── Chirp engine ─────────────────────────────────────────────────────────────
+
+async function transcribeChirp(pcm, language) {
+  const token = await accessToken();
+  const host = `https://${SPEECH_LOCATION}-speech.googleapis.com`;
+  const url = `${host}/v2/projects/${GCP_PROJECT}/locations/${SPEECH_LOCATION}/recognizers/_:recognize`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      config: {
+        model: SPEECH_MODEL,
+        languageCodes: [toBcp47(language)],
+        features: { enableAutomaticPunctuation: true },
+        // Input is raw PCM with no container, so decoding must be explicit.
+        explicitDecodingConfig: {
+          encoding: 'LINEAR16',
+          sampleRateHertz: SAMPLE_RATE,
+          audioChannelCount: 1,
+        },
+      },
+      content: pcm.toString('base64'),
+    }),
+    signal: AbortSignal.timeout(Number(process.env.SPEECH_TIMEOUT_MS ?? 60_000)),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`speech api ${res.status}: ${body.slice(0, 300)}`);
+  }
+
+  const data = await res.json();
+  const parts = [];
+  let confidence = 0, n = 0;
+  for (const r of data.results ?? []) {
+    const alt = r.alternatives?.[0];
+    if (!alt?.transcript) continue;
+    parts.push(alt.transcript.trim());
+    if (typeof alt.confidence === 'number') { confidence += alt.confidence; n++; }
+  }
+  return { text: parts.join(' ').trim(), confidence: n ? confidence / n : 1 };
+}
+
+// ── Whisper engine (fallback / fully self-hosted mode) ───────────────────────
+
+let asr = null, whisperLoading = null;
+
+function loadWhisper() {
+  whisperLoading ??= (async () => {
+    const { pipeline, env } = await import('@huggingface/transformers');
+    env.cacheDir = process.env.MODEL_CACHE ?? '/models';
+    env.allowLocalModels = true;
+    asr = await pipeline('automatic-speech-recognition',
+      process.env.WHISPER_MODEL ?? 'Xenova/whisper-small',
+      { dtype: process.env.WHISPER_DTYPE ?? 'q8' });
+    console.log('whisper ready');
+  })();
+  return whisperLoading;
+}
+
+async function transcribeWhisper(pcm, language) {
+  if (!asr) await loadWhisper();
+  const audio = new Float32Array(pcm.length / 2);
+  for (let i = 0; i < audio.length; i++) audio[i] = pcm.readInt16LE(i * 2) / 32768;
+  const out = await asr(audio, {
+    task: 'transcribe',
+    language: String(language || 'en').split('-')[0],
+    return_timestamps: false,
+    chunk_length_s: 30,
+    stride_length_s: 5,
+    no_repeat_ngram_size: 3,
+    repetition_penalty: 1.15,
+    num_beams: 1,
+  });
+  return { text: String(out?.text ?? '').trim(), confidence: 1 };
+}
+
+// ── HTTP ─────────────────────────────────────────────────────────────────────
+
 const app = express();
-// Audio arrives as raw little-endian PCM16 — not JSON, not multipart.
 app.use('/transcribe', express.raw({ type: '*/*', limit: '25mb' }));
 
-app.get('/healthz', (_req, res) => res.json({ ok: true, ready: Boolean(asr), model: MODEL_ID }));
+app.get('/healthz', (_req, res) =>
+  res.json({ ok: true, engine: ENGINE, model: ENGINE === 'chirp' ? SPEECH_MODEL : (process.env.WHISPER_MODEL ?? 'Xenova/whisper-small'), location: SPEECH_LOCATION }));
 
 app.post('/transcribe', async (req, res) => {
+  const started = Date.now();
+  const language = req.query.language || process.env.STT_LANGUAGE || 'en';
+  const pcm = req.body;
+
   try {
-    if (!asr) await load();
-
-    // Whisper needs an explicit language. transformers.js does NOT auto-detect:
-    // with none it defaults to English and *translates* rather than transcribes,
-    // which destroys code-mixed Hinglish. The caller always sends one.
-    const language = req.query.language || process.env.WHISPER_LANGUAGE || 'en';
-
-    const buf = req.body;
-    if (!buf?.length || buf.length < SAMPLE_RATE * 0.3 * 2) {
-      return res.json({ text: '', language, confidence: 0 });
+    if (!pcm?.length || pcm.length < SAMPLE_RATE * MIN_SECONDS * 2) {
+      return res.json({ text: '', language, confidence: 0, skipped: 'too-short' });
     }
 
-    const audio = new Float32Array(buf.length / 2);
-    for (let i = 0; i < audio.length; i++) audio[i] = buf.readInt16LE(i * 2) / 32768;
-
-    // Whisper hallucinates on silence — feed it digital silence and it invents
-    // plausible words ("अपने आदा"). Gate on signal energy before spending an
-    // inference call, which also drops the cost of an idle open mic to zero.
+    // Both engines invent words from digital silence. Gate before spending a call.
     let sum = 0;
-    for (let i = 0; i < audio.length; i++) sum += audio[i] * audio[i];
-    const rms = Math.sqrt(sum / audio.length);
-    if (rms < SILENCE_RMS) {
+    const n = pcm.length / 2;
+    for (let i = 0; i < n; i++) { const v = pcm.readInt16LE(i * 2) / 32768; sum += v * v; }
+    if (Math.sqrt(sum / n) < SILENCE_RMS) {
       return res.json({ text: '', language, confidence: 0, skipped: 'silence' });
     }
 
-    const out = await asr(audio, {
-      task: 'transcribe',
-      language,
-      return_timestamps: false,
-      chunk_length_s: 30,
-      stride_length_s: 5,
-      // Whisper degenerates into repeated-token loops on short or noisy
-      // windows ("करुँँँँँ…"). These bound it without hurting normal output.
-      no_repeat_ngram_size: 3,
-      repetition_penalty: 1.15,
-      num_beams: 1,
-    });
+    const { text, confidence } =
+      ENGINE === 'whisper' ? await transcribeWhisper(pcm, language)
+                           : await transcribeChirp(pcm, language);
 
-    const text = String(out?.text ?? '').trim();
-    res.json({ text, language, confidence: text ? 1 : 0 });
+    res.json({ text, language, confidence, engine: ENGINE, ms: Date.now() - started });
   } catch (err) {
-    console.error('transcribe failed:', err);
-    res.status(500).json({ error: err.message });
+    console.error('transcribe failed:', err.message);
+    res.status(502).json({ error: err.message, engine: ENGINE });
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`stt-service listening on ${PORT}`);
-  load().catch((e) => console.error('preload failed:', e.message));
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`stt-service listening on ${PORT} · engine=${ENGINE} · model=${ENGINE === 'chirp' ? SPEECH_MODEL : process.env.WHISPER_MODEL}`);
+  if (ENGINE === 'whisper') loadWhisper().catch((e) => console.error('whisper preload failed:', e.message));
 });
+
+// Cloud Run sends SIGTERM before stopping the instance; finish in-flight work.
+process.on('SIGTERM', () => server.close(() => process.exit(0)));

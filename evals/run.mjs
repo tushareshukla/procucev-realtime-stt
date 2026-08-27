@@ -67,6 +67,15 @@ for (const c of cases) {
     const { text, durationS, latencyS } = await transcribe(path.join(DIR, 'fixtures', c.audio), c.language);
     const fails = check(c.assert ?? {}, text, c.reference);
     const rtf = latencyS / durationS;
+    // RTF is meaningless on very short clips — fixed API round-trip overhead
+    // dominates. Judge those on wall-clock latency instead.
+    const SHORT_CLIP_S = 2;
+    if (durationS < SHORT_CLIP_S) {
+      const budget = c.assert?.maxLatencyS ?? 5;
+      if (latencyS > budget) fails.push(`latency ${latencyS.toFixed(1)}s > budget ${budget}s`);
+    } else if (c.assert?.maxRtf != null && rtf > c.assert.maxRtf) {
+      fails.push(`RTF ${rtf.toFixed(2)}x > budget ${c.assert.maxRtf}x`);
+    }
     results.push({ ...c, text, latencyS, durationS, rtf, fails });
     console.log(fails.length ? `${C.red}FAIL${C.off}` : `${C.grn}pass${C.off}`
       + `  ${C.dim}${latencyS.toFixed(1)}s  RTF ${rtf.toFixed(2)}x${C.off}`);

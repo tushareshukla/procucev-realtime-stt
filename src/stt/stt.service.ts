@@ -46,6 +46,20 @@ export class SttService implements OnModuleInit {
     return this.reachable;
   }
 
+  /** Live upstream check, used by /readyz. */
+  async health(): Promise<{ reachable: boolean; url: string; engine?: string; model?: string }> {
+    if (!STT_SERVICE_URL) return { reachable: false, url: '' };
+    try {
+      const res = await fetch(`${STT_SERVICE_URL}/healthz`, { signal: AbortSignal.timeout(8_000) });
+      const body = await res.json().catch(() => ({}));
+      this.reachable = res.ok;
+      return { reachable: res.ok, url: STT_SERVICE_URL, engine: body?.engine, model: body?.model };
+    } catch {
+      this.reachable = false;
+      return { reachable: false, url: STT_SERVICE_URL };
+    }
+  }
+
   /**
    * Send a mono 16 kHz window for transcription.
    *

@@ -3,6 +3,7 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 
+import { HealthController } from './health.controller';
 import { MastraController } from './mastra/mastra.controller';
 import { MastraService } from './mastra/mastra.service';
 import { SttService } from './stt/stt.service';
@@ -40,7 +41,7 @@ const usePostgres = databaseUrl.startsWith('postgres');
     TypeOrmModule.forFeature([Transcription]),
     ServeStaticModule.forRoot({ rootPath: join(__dirname, '..', 'public') }),
   ],
-  controllers: [TranscriptionController, MastraController],
+  controllers: [HealthController, TranscriptionController, MastraController],
   providers: [TranscriptionService, SttService, TranscriptionGateway, MastraService],
 })
 export class AppModule {}
