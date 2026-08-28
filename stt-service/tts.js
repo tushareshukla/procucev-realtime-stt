@@ -9,6 +9,8 @@
  * Both run locally in this container. No hosted TTS API is involved.
  */
 import { spawn } from 'node:child_process';
+import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -93,20 +95,35 @@ function floatToPcm16Wav(samples, sampleRate) {
 
 function speakPiper(text, voice, speed) {
   const model = path.join(PIPER_VOICE_DIR, `${voice}.onnx`);
-  if (!fs.existsSync(PIPER_BIN)) throw new Error('piper binary not installed in this image');
+  if (!fs.existsSync(PIPER_BIN)) throw new Error('piper is not installed in this image');
   if (!fs.existsSync(model)) throw new Error(`piper voice not found: ${voice}`);
 
+  // piper1-gpl writes a WAV file rather than to stdout, so synthesise into a
+  // unique temp path and read it back.
+  const out = path.join(os.tmpdir(), `piper-${randomUUID()}.wav`);
+
   return new Promise((resolve, reject) => {
-    // length_scale is inverse to speed: 1/speed slows down as speed drops.
-    const args = ['--model', model, '--output_file', '-', '--length_scale', String(1 / Math.max(0.1, speed))];
+    const args = [
+      '-m', 'piper',
+      '--model', model,
+      '--output-file', out,
+      // length_scale is inverse to speed: a larger scale means slower speech.
+      '--length-scale', String(1 / Math.max(0.1, speed)),
+    ];
     const proc = spawn(PIPER_BIN, args);
-    const chunks = [], errs = [];
-    proc.stdout.on('data', (d) => chunks.push(d));
+    const errs = [];
     proc.stderr.on('data', (d) => errs.push(d));
     proc.on('error', reject);
-    proc.on('close', (code) =>
-      code === 0 ? resolve(Buffer.concat(chunks))
-                 : reject(new Error(`piper exited ${code}: ${Buffer.concat(errs).toString().slice(0, 200)}`)));
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        fs.rm(out, { force: true }, () => {});
+        return reject(new Error(`piper exited ${code}: ${Buffer.concat(errs).toString().slice(0, 200)}`));
+      }
+      fs.readFile(out, (err, data) => {
+        fs.rm(out, { force: true }, () => {});
+        err ? reject(err) : resolve(data);
+      });
+    });
     proc.stdin.end(text);
   });
 }

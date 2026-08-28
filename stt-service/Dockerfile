@@ -4,8 +4,16 @@ WORKDIR /srv
 ENV NODE_ENV=production MODEL_CACHE=/models
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl xz-utils libgomp1 \
+      ca-certificates curl xz-utils libgomp1 python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# piper1-gpl rather than the 2023 binary: that release cannot handle voices
+# whose phoneme map contains multi-codepoint entries, so Bengali, Marathi,
+# Urdu, Chinese and Japanese all failed with
+#   "aɪ" is not a single codepoint
+# The maintained Python distribution synthesises them correctly.
+RUN python3 -m venv /opt/piper-venv \
+ && /opt/piper-venv/bin/pip install --no-cache-dir piper-tts
 
 COPY package.json ./
 RUN npm install --omit=dev
@@ -55,12 +63,9 @@ COPY voices /voices
 # One medium-quality voice per language. Piper has no Tamil, Gujarati, Kannada
 # or Punjabi voice, so those are transcription-only and the UI does not offer
 # them for synthesis.
-ARG PIPER_VERSION=2023.11.14-2
 ENV PIPER_VOICES="hi/hi_IN/pratham/medium/hi_IN-pratham-medium bn/bn_BD/google/medium/bn_BD-google-medium te/te_IN/maya/medium/te_IN-maya-medium mr/mr_IN/google/medium/mr_IN-google-medium ml/ml_IN/arjun/medium/ml_IN-arjun-medium ur/ur_PK/aegis_female/medium/ur_PK-aegis_female-medium ar/ar_JO/kareem/medium/ar_JO-kareem-medium es/es_ES/davefx/medium/es_ES-davefx-medium fr/fr_FR/mls/medium/fr_FR-mls-medium de/de_DE/mls/medium/de_DE-mls-medium zh/zh_CN/chaowen/medium/zh_CN-chaowen-medium ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium"
 RUN set -eu; \
     mkdir -p /opt/piper/voices; cd /tmp; \
-    curl -sfL "https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_x86_64.tar.gz" -o piper.tgz; \
-    tar -xzf piper.tgz -C /opt; rm piper.tgz; \
     base="https://huggingface.co/rhasspy/piper-voices/resolve/main"; \
     for v in ${PIPER_VOICES}; do \
       name="${v##*/}"; \
@@ -74,8 +79,7 @@ COPY server.js languages.js tts.js ./
 
 ENV PORT=8080 \
     STT_ENGINE=whisper \
-    PIPER_BIN=/opt/piper/piper \
+    PIPER_BIN=/opt/piper-venv/bin/python \
     PIPER_VOICE_DIR=/opt/piper/voices \
-    LD_LIBRARY_PATH=/opt/piper
 EXPOSE 8080
 CMD ["node", "server.js"]
