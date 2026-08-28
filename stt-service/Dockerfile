@@ -13,7 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #   "aɪ" is not a single codepoint
 # The maintained Python distribution synthesises them correctly.
 RUN python3 -m venv /opt/piper-venv \
- && /opt/piper-venv/bin/pip install --no-cache-dir piper-tts
+ # The [ja] extra pulls the Japanese phonemizer; without it that voice
+ # produces no phonemes at all and piper writes an empty file.
+ && /opt/piper-venv/bin/pip install --no-cache-dir 'piper-tts[ja]'
 
 COPY package.json ./
 RUN npm install --omit=dev
@@ -63,7 +65,7 @@ COPY voices /voices
 # One medium-quality voice per language. Piper has no Tamil, Gujarati, Kannada
 # or Punjabi voice, so those are transcription-only and the UI does not offer
 # them for synthesis.
-ENV PIPER_VOICES="hi/hi_IN/pratham/medium/hi_IN-pratham-medium bn/bn_BD/google/medium/bn_BD-google-medium te/te_IN/maya/medium/te_IN-maya-medium mr/mr_IN/google/medium/mr_IN-google-medium ml/ml_IN/arjun/medium/ml_IN-arjun-medium ur/ur_PK/aegis_female/medium/ur_PK-aegis_female-medium ar/ar_JO/kareem/medium/ar_JO-kareem-medium es/es_ES/davefx/medium/es_ES-davefx-medium fr/fr_FR/mls/medium/fr_FR-mls-medium de/de_DE/mls/medium/de_DE-mls-medium zh/zh_CN/chaowen/medium/zh_CN-chaowen-medium ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium"
+ENV PIPER_VOICES="hi/hi_IN/pratham/medium/hi_IN-pratham-medium bn/bn_BD/google/medium/bn_BD-google-medium te/te_IN/maya/medium/te_IN-maya-medium mr/mr_IN/google/medium/mr_IN-google-medium ml/ml_IN/arjun/medium/ml_IN-arjun-medium ur/ur_PK/aegis_female/medium/ur_PK-aegis_female-medium ar/ar_JO/kareem/medium/ar_JO-kareem-medium es/es_ES/davefx/medium/es_ES-davefx-medium fr/fr_FR/mls/medium/fr_FR-mls-medium de/de_DE/mls/medium/de_DE-mls-medium zh/zh_CN/huayan/medium/zh_CN-huayan-medium ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium"
 RUN set -eu; \
     mkdir -p /opt/piper/voices; cd /tmp; \
     base="https://huggingface.co/rhasspy/piper-voices/resolve/main"; \

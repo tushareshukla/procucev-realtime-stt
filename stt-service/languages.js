@@ -13,6 +13,12 @@ export const BCP47 = {
   pt: 'pt-BR', ru: 'ru-RU', it: 'it-IT', nl: 'nl-NL', tr: 'tr-TR',
 };
 
+/**
+ * Voice selection note: Piper voices declare a phoneme_type. Only `espeak`
+ * voices work without extra phonemizers, so zh uses huayan (espeak) rather
+ * than chaowen (pinyin). Japanese has one voice and it needs the [ja] extra,
+ * which the image installs.
+ */
 export function toBcp47(code) {
   if (!code) return BCP47.en;
   const k = String(code).toLowerCase();
