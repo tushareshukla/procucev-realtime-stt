@@ -3,7 +3,18 @@
 async function json(url, options) {
   // Same-origin credentials so the session cookie travels with every call.
   const res = await fetch(url, { credentials: 'same-origin', ...options });
-  if (!res.ok) throw new Error(`${options?.method ?? 'GET'} ${url} → ${res.status}`);
+  if (!res.ok) {
+    // Prefer the server's explanation. "Service is starting up, try again"
+    // is actionable; "POST /api/... → 503" is not.
+    let detail = '';
+    try {
+      const body = await res.json();
+      detail = Array.isArray(body?.message) ? body.message.join(', ') : (body?.message ?? '');
+    } catch {
+      /* not JSON — fall back to the status line */
+    }
+    throw new Error(detail || `${options?.method ?? 'GET'} ${url} → ${res.status}`);
+  }
   return res.status === 204 ? null : res.json();
 }
 

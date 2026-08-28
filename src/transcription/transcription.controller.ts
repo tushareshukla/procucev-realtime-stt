@@ -1,5 +1,6 @@
 import {
   Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Put, Query, Req, Res,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { IsIn, IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
@@ -81,7 +82,20 @@ export class TranscriptionController {
   @Post('transcribe')
   async transcribe(@Body() dto: TranscribeDto) {
     const wav = Buffer.from(dto.audioBase64, 'base64');
-    return this.stt.transcribeWav(wav, dto.language ?? 'en');
+    const result = await this.stt.transcribeWav(wav, dto.language ?? 'en');
+
+    // Say why there is no text. Reporting a cold inference service as an
+    // empty transcript reads as "you said nothing", which sends people
+    // looking for a bug in their microphone.
+    if (result.status === 'warming') {
+      throw new ServiceUnavailableException(
+        'Transcription service is starting up (it scales to zero when idle). Try again in a minute.',
+      );
+    }
+    if (result.status === 'unavailable') {
+      throw new ServiceUnavailableException('Transcription service is unreachable.');
+    }
+    return result;
   }
 
   @Post()

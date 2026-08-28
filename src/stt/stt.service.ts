@@ -10,12 +10,24 @@ export const DEFAULT_LANGUAGE = process.env.WHISPER_LANGUAGE ?? 'en';
  * model weights) while inference scales to zero independently.
  */
 const STT_SERVICE_URL = (process.env.STT_SERVICE_URL ?? '').replace(/\/$/, '');
-const REQUEST_TIMEOUT_MS = Number(process.env.STT_TIMEOUT_MS ?? 30_000);
+/**
+ * Long enough to outlast a cold start. The inference service scales to zero,
+ * and loading whisper-large-v3-turbo at fp32 takes ~60s, so a 30s budget
+ * aborted every first-request-after-idle and surfaced it as "no speech".
+ * Cloud Run's own request timeout is 300s, so this stays inside it.
+ */
+const REQUEST_TIMEOUT_MS = Number(process.env.STT_TIMEOUT_MS ?? 120_000);
 
 export interface SttResult {
   text: string;
   language: string;
   confidence: number;
+  /**
+   * Why the text is empty, when it is. Silence and a cold inference service
+   * are very different problems and used to be indistinguishable to the
+   * caller — both arrived as an empty string.
+   */
+  status?: 'ok' | 'warming' | 'unavailable';
 }
 
 @Injectable()
@@ -100,8 +112,8 @@ export class SttService implements OnModuleInit {
    * but relying on that would silently translate English sessions.
    */
   async transcribe(audio: Float32Array, language = DEFAULT_LANGUAGE): Promise<SttResult> {
-    const empty: SttResult = { text: '', language, confidence: 0 };
-    if (!STT_SERVICE_URL) return empty;
+    const empty: SttResult = { text: '', language, confidence: 0, status: 'ok' };
+    if (!STT_SERVICE_URL) return { ...empty, status: 'unavailable' };
     if (audio.length < SAMPLE_RATE * 0.3) return empty;
 
     // Back to PCM16 for the wire: half the bytes of Float32, and what the
@@ -125,7 +137,7 @@ export class SttService implements OnModuleInit {
 
       if (!res.ok) {
         this.log.warn(`stt-service returned ${res.status}`);
-        return empty;
+        return { ...empty, status: 'unavailable' };
       }
       this.reachable = true;
       const body = await res.json();
@@ -133,11 +145,15 @@ export class SttService implements OnModuleInit {
         text: String(body?.text ?? '').trim(),
         language: body?.language ?? language,
         confidence: Number(body?.confidence ?? 0),
+        status: 'ok',
       };
     } catch (err) {
       this.reachable = false;
       this.log.warn(`transcribe failed: ${err.message}`);
-      return empty;
+      // A timeout here almost always means the service is cold and still
+      // loading the model, which is worth retrying; anything else is not.
+      const warming = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      return { ...empty, status: warming ? 'warming' : 'unavailable' };
     }
   }
 }

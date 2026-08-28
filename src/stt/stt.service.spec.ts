@@ -84,7 +84,29 @@ describe('SttService', () => {
     const { SttService } = loadService();
     const r = await new SttService().transcribe(speech(1), 'hi');
 
-    expect(r).toEqual({ text: '', language: 'hi', confidence: 0 });
+    expect(r).toEqual({ text: '', language: 'hi', confidence: 0, status: 'unavailable' });
+  });
+
+  // The inference service scales to zero and takes ~60s to load the model.
+  // A timeout used to come back as an empty transcript, which the UI showed
+  // as "no speech was recognised" — sending people to debug their microphone
+  // when the real answer was "wait and retry".
+  it('reports a timeout as warming, not as silence', async () => {
+    const timeout = Object.assign(new Error('timed out'), { name: 'TimeoutError' });
+    mockFetch(jest.fn().mockRejectedValue(timeout));
+    const { SttService } = loadService();
+    const r = await new SttService().transcribe(speech(1), 'hi');
+
+    expect(r.status).toBe('warming');
+    expect(r.text).toBe('');
+  });
+
+  it('distinguishes an unreachable service from a warming one', async () => {
+    mockFetch(jest.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+    const { SttService } = loadService();
+    const r = await new SttService().transcribe(speech(1), 'hi');
+
+    expect(r.status).toBe('unavailable');
   });
 
   it('returns empty instead of throwing when the network fails', async () => {
