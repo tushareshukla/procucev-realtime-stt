@@ -47,7 +47,13 @@ const usePostgres = databaseUrl.startsWith('postgres');
     TypeOrmModule.forFeature([Transcription, Session]),
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'public'),
+      // API routes must never fall through to the static handler, and the app
+      // shell must not be served straight off disk — IndexController stamps a
+      // build id into it. Without index:false the middleware answers "/" first
+      // and the placeholder ships unsubstituted.
+      exclude: ['/api/{*splat}', '/healthz', '/readyz'],
       serveStaticOptions: {
+        index: false,
         // The UI is a handful of small files that change on every deploy.
         // Without this browsers keep serving a stale app.js after a release,
         // which looks exactly like the new code being broken.
