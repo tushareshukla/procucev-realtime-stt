@@ -70,7 +70,9 @@ export function buildTranscriptAgent(transcriptions: TranscriptionService) {
       'script the transcript already uses; do not transliterate between them.',
       'Never invent content that is not in the transcript.',
     ].join('\n'),
-    model: google(process.env.MASTRA_MODEL ?? 'gemini-2.5-flash'),
+    // gemini-2.5-flash is closed to new API keys ("no longer available to
+    // new users"), so a fresh deployment must not default to it.
+    model: google(process.env.MASTRA_MODEL ?? 'gemini-3.6-flash'),
     tools: { getSessionTranscript, listRecent },
   });
 

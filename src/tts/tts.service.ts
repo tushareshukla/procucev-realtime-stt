@@ -1,4 +1,4 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
 import { Readable } from 'node:stream';
 
 const STT_SERVICE_URL = (process.env.STT_SERVICE_URL ?? '').replace(/\/$/, '');
@@ -61,6 +61,14 @@ export class TtsService {
     });
     if (!res.ok || !res.body) {
       const detail = await res.text().catch(() => '');
+      // A 422 is the caller's problem (e.g. no voice for that language) and
+      // carries a useful body — flattening it into a 503/502 hid the list of
+      // languages that DO work.
+      if (res.status === 422) {
+        let parsed: unknown;
+        try { parsed = JSON.parse(detail); } catch { parsed = { error: detail.slice(0, 200) }; }
+        throw new UnprocessableEntityException(parsed);
+      }
       throw new ServiceUnavailableException(`tts stream failed: ${res.status} ${detail.slice(0, 200)}`);
     }
     // fetch() yields a Web ReadableStream, which has no .pipe(); Express needs

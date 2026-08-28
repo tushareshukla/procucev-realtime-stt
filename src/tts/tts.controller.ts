@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { IsIn, IsNumber, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
 import { Logger } from '@nestjs/common';
@@ -52,6 +52,15 @@ export class TtsController {
       });
       upstream.pipe(res);
     } catch (err) {
+      // Keep upstream's own verdicts: a 422 ("no voice for that language")
+      // must reach the browser with its list of supported languages, not be
+      // relabelled a gateway failure.
+      if (err instanceof HttpException) {
+        const status = err.getStatus();
+        const body = err.getResponse();
+        if (!res.headersSent) res.status(status).json(typeof body === 'string' ? { error: body } : body);
+        return;
+      }
       // Nest would otherwise mask this as a bare "Internal server error",
       // which makes a proxy failure indistinguishable from a bug here.
       const message = err instanceof Error ? err.message : String(err);

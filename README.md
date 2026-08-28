@@ -44,8 +44,19 @@ loads in <1 s.
 - `WS /ws/transcribe` — send 16 kHz mono PCM16 binary frames; receive
   `{type:'partial'}` / `{type:'final'}`. Send `{"type":"config","language":"hi"}`
   to set the language, or `flush` to force a commit.
-- `GET|PUT|DELETE /api/transcriptions[/:id]` — CRUD over history.
-- `POST /api/agent/{ask,cleanup/:sid,summarize/:sid}` — Mastra agent.
+- `GET|POST /api/session` — identity. The name lives in a server-side session
+  behind an httpOnly cookie (persisted to the DB, so restarts don't sign anyone
+  out); the page never holds identity in browser storage.
+- `GET|POST|PUT|DELETE /api/transcriptions[/:id]` — CRUD over history, scoped
+  to the session's user. `GET /:id/audio` streams the stored recording.
+- `POST /api/transcriptions/transcribe` — one-shot transcription of a finished
+  recording (`{audioBase64, language}`); backs the UI's "Generate transcript"
+  button. Answers `503` with a reason while the inference service is cold.
+- `POST /api/tts/stream` — `{text, language}`; streams length-prefixed WAV
+  chunks per sentence across 13 languages. `422` lists supported languages if
+  asked for one with no installed voice. `GET /api/tts/voices` lists voices.
+- `POST /api/agent/{ask,cleanup/:sid,summarize/:sid}` — Mastra agent
+  (gated on `GOOGLE_GENERATIVE_AI_API_KEY`; reports `enabled:false` without it).
 
 ## Two things worth knowing
 
