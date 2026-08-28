@@ -80,6 +80,6 @@ COPY server.js languages.js tts.js ./
 ENV PORT=8080 \
     STT_ENGINE=whisper \
     PIPER_BIN=/opt/piper-venv/bin/python \
-    PIPER_VOICE_DIR=/opt/piper/voices \
+    PIPER_VOICE_DIR=/opt/piper/voices
 EXPOSE 8080
 CMD ["node", "server.js"]
