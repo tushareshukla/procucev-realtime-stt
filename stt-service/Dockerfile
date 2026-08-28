@@ -23,12 +23,23 @@ ARG WHISPER_MODEL=onnx-community/whisper-large-v3-turbo
 #   fp32 — mean WER 13.2%, RTF 3.2x   <- best accuracy AND fastest of the two
 ARG WHISPER_DTYPE=fp32
 ENV WHISPER_MODEL=${WHISPER_MODEL} WHISPER_DTYPE=${WHISPER_DTYPE}
-RUN node -e "\
-import('@huggingface/transformers').then(async ({pipeline, env}) => { \
-  env.cacheDir='/models'; \
-  await pipeline('automatic-speech-recognition', process.env.WHISPER_MODEL, {dtype: process.env.WHISPER_DTYPE}); \
-  console.log('whisper baked:', process.env.WHISPER_DTYPE); \
-})"
+# The fp32 weights are ~3GB and the transfer intermittently drops mid-download
+# ("SocketError: other side closed"), which fails the whole build. Retry a few
+# times; the library resumes from its cache so a retry is cheap.
+RUN for attempt in 1 2 3 4 5; do \
+      echo "baking whisper (attempt $attempt)"; \
+      node -e "import('@huggingface/transformers').then(async ({pipeline, env}) => { \
+        env.cacheDir='/models'; \
+        await pipeline('automatic-speech-recognition', process.env.WHISPER_MODEL, {dtype: process.env.WHISPER_DTYPE}); \
+        console.log('whisper baked:', process.env.WHISPER_DTYPE); \
+      })" && break; \
+      echo "attempt $attempt failed; retrying"; sleep 5; \
+    done; \
+    node -e "import('@huggingface/transformers').then(async ({pipeline, env}) => { \
+      env.cacheDir='/models'; env.allowRemoteModels=false; \
+      await pipeline('automatic-speech-recognition', process.env.WHISPER_MODEL, {dtype: process.env.WHISPER_DTYPE}); \
+      console.log('verified from cache'); \
+    })"
 
 # ── TTS: Kokoro-82M (Apache-2.0), English ────────────────────────────────────
 # kokoro-js resolves voice embeddings from <cwd>/../voices and never falls back
