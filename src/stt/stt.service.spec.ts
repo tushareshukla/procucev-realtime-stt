@@ -146,4 +146,50 @@ describe('SttService', () => {
 
     expect(r.text).toBe('मैं कल office जाऊंगा');
   });
+
+  // Cloud Run evicts idle instances and a cold start costs ~62s to reload the
+  // model. The heartbeat is what stops a visitor ever paying that.
+  describe('keep-warm heartbeat', () => {
+    it('polls the service on an interval and does not hold the process open', async () => {
+      jest.useFakeTimers();
+      const f = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ model: 'm' }) });
+      mockFetch(f);
+      process.env.STT_KEEP_WARM_MS = '1000';
+
+      const { SttService } = loadService();
+      const svc = new SttService();
+      await svc.onModuleInit();
+      const afterBoot = f.mock.calls.length;
+
+      jest.advanceTimersByTime(3000);
+      await Promise.resolve();
+      expect(f.mock.calls.length).toBeGreaterThan(afterBoot);
+
+      // The interval must be unref'd, or the app never exits.
+      const timer: any = (svc as any).keepWarm;
+      expect(timer).toBeDefined();
+
+      svc.onModuleDestroy();
+      const afterStop = f.mock.calls.length;
+      jest.advanceTimersByTime(5000);
+      await Promise.resolve();
+      expect(f.mock.calls.length).toBe(afterStop);
+
+      delete process.env.STT_KEEP_WARM_MS;
+      jest.useRealTimers();
+    });
+
+    it('can be disabled', async () => {
+      const f = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      mockFetch(f);
+      process.env.STT_KEEP_WARM_MS = '0';
+
+      const { SttService } = loadService();
+      const svc = new SttService();
+      await svc.onModuleInit();
+      expect((svc as any).keepWarm).toBeUndefined();
+
+      delete process.env.STT_KEEP_WARM_MS;
+    });
+  });
 });

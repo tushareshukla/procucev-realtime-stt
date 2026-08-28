@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { SAMPLE_RATE } from './stream-state';
 
 /** Hindi default: the target case is Hinglish, and `en` would translate it away. */
@@ -18,6 +18,18 @@ const STT_SERVICE_URL = (process.env.STT_SERVICE_URL ?? '').replace(/\/$/, '');
  */
 const REQUEST_TIMEOUT_MS = Number(process.env.STT_TIMEOUT_MS ?? 120_000);
 
+/**
+ * How often to poke the inference service so Cloud Run keeps the instance.
+ *
+ * Cloud Run evicts idle instances, and a cold start costs ~62s to reload the
+ * model. This backend is always on, so it can cheaply hold one instance warm:
+ * CPU is billed only while a request is in flight, so a sub-second ping every
+ * few minutes costs a few seconds of compute per day — far less than pinning
+ * min-instances. Not a guarantee (Cloud Run may still evict), which is why
+ * the long request timeout stays as the backstop. Set 0 to disable.
+ */
+const KEEP_WARM_MS = Number(process.env.STT_KEEP_WARM_MS ?? 5 * 60_000);
+
 export interface SttResult {
   text: string;
   language: string;
@@ -31,9 +43,10 @@ export interface SttResult {
 }
 
 @Injectable()
-export class SttService implements OnModuleInit {
+export class SttService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger(SttService.name);
   private reachable = false;
+  private keepWarm?: NodeJS.Timeout;
 
   async onModuleInit(): Promise<void> {
     if (!STT_SERVICE_URL) {
@@ -42,16 +55,45 @@ export class SttService implements OnModuleInit {
     }
     // Ping on boot so a misconfigured URL surfaces in logs, not mid-stream.
     // This also warms the Cloud Run instance ahead of the first speaker.
+    //
+    // `/status`, not `/healthz`: infrastructure in front of Cloud Run answers
+    // `/healthz` itself with an HTML page, so this probe logged "unreachable"
+    // on every boot of a service that was in fact healthy.
     try {
-      const res = await fetch(`${STT_SERVICE_URL}/healthz`, {
-        method: 'POST',
-        signal: AbortSignal.timeout(10_000),
+      const res = await fetch(`${STT_SERVICE_URL}/status`, {
+        signal: AbortSignal.timeout(30_000),
       });
       const body = await res.json();
       this.reachable = res.ok;
       this.log.log(`stt-service reachable at ${STT_SERVICE_URL} (model: ${body?.model})`);
     } catch (err) {
       this.log.warn(`stt-service unreachable at ${STT_SERVICE_URL}: ${err.message}`);
+    }
+
+    if (KEEP_WARM_MS > 0) {
+      this.keepWarm = setInterval(() => void this.ping(), KEEP_WARM_MS);
+      // Never hold the process open just for the heartbeat.
+      this.keepWarm.unref?.();
+      this.log.log(`keeping stt-service warm every ${Math.round(KEEP_WARM_MS / 1000)}s`);
+    }
+  }
+
+  onModuleDestroy(): void {
+    if (this.keepWarm) clearInterval(this.keepWarm);
+  }
+
+  /**
+   * Cheapest call that still counts as traffic: it reports status without
+   * running the model, so it resets Cloud Run's idle timer for ~50ms of CPU.
+   */
+  private async ping(): Promise<void> {
+    try {
+      const res = await fetch(`${STT_SERVICE_URL}/status`, {
+        signal: AbortSignal.timeout(30_000),
+      });
+      this.reachable = res.ok;
+    } catch {
+      this.reachable = false;
     }
   }
 
