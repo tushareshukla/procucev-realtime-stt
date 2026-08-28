@@ -1,50 +1,52 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-// Minimal localStorage stand-in so the module can be tested outside a browser.
-const store = new Map();
-globalThis.localStorage = {
-  getItem: (k) => (store.has(k) ? store.get(k) : null),
-  setItem: (k, v) => store.set(k, String(v)),
-  removeItem: (k) => store.delete(k),
+let calls = [];
+let sessionName = null;
+globalThis.fetch = async (url, opts = {}) => {
+  calls.push({ url, method: opts.method ?? 'GET' });
+  if (opts.method === 'POST') {
+    sessionName = JSON.parse(opts.body).name;
+    return { ok: true, json: async () => ({ userName: sessionName }) };
+  }
+  return { ok: true, json: async () => ({ userName: sessionName }) };
 };
-const { getUser, setUser, clearUser, ensureUser } = await import('./user.js');
 
-describe('user', () => {
-  beforeEach(() => store.clear());
+const { getUser, setUser, loadUser, ensureUser } = await import('./user.js');
 
-  test('no name initially', () => assert.equal(getUser(), ''));
+describe('user identity via server session', () => {
+  beforeEach(() => { calls = []; sessionName = null; });
 
-  test('stores and returns a trimmed name', () => {
-    assert.equal(setUser('  Tushar  '), 'Tushar');
+  test('asks the server rather than reading browser storage', async () => {
+    await loadUser();
+    assert.equal(calls[0].url, '/api/session');
+    assert.equal(calls[0].method, 'GET');
+  });
+
+  test('starting a session posts the name and returns it', async () => {
+    assert.equal(await setUser('  Tushar  '), 'Tushar');
     assert.equal(getUser(), 'Tushar');
+    assert.equal(calls.at(-1).method, 'POST');
   });
 
-  test('ignores an empty name', () => {
-    assert.equal(setUser('   '), '');
-    assert.equal(getUser(), '');
+  test('an empty name never reaches the server', async () => {
+    assert.equal(await setUser('   '), '');
+    assert.equal(calls.length, 0);
   });
 
-  test('caps absurdly long names to the column width', () => {
-    assert.equal(setUser('x'.repeat(200)).length, 80);
-  });
-
-  test('clears', () => {
-    setUser('Tushar'); clearUser();
-    assert.equal(getUser(), '');
-  });
-
-  test('ensureUser skips the prompt when a name is known', async () => {
-    setUser('Tushar');
+  test('ensureUser skips the prompt when the server knows us', async () => {
+    sessionName = 'Asha';
     let prompted = false;
-    const name = await ensureUser({ onPrompt: () => { prompted = true; } });
-    assert.equal(name, 'Tushar');
+    assert.equal(await ensureUser({ onPrompt: () => { prompted = true; } }), 'Asha');
     assert.equal(prompted, false);
   });
 
-  test('ensureUser prompts when no name is stored', async () => {
-    const name = await ensureUser({ onPrompt: (done) => done('Asha') });
-    assert.equal(name, 'Asha');
-    assert.equal(getUser(), 'Asha');
+  // The point of moving off localStorage: a reload re-reads the session, so
+  // history survives refresh without the page holding identity itself.
+  test('ensureUser prompts when the server has no session', async () => {
+    sessionName = null;
+    const name = await ensureUser({ onPrompt: (done) => done('Ravi') });
+    assert.equal(name, 'Ravi');
+    assert.equal(getUser(), 'Ravi');
   });
 });

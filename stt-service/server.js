@@ -13,7 +13,7 @@
 import express from 'express';
 import { GoogleAuth } from 'google-auth-library';
 import { toBcp47 } from './languages.js';
-import { synthesize, synthesizeStream, listVoices, engineFor } from './tts.js';
+import { synthesize, synthesizeStream, listVoices, engineFor, installedLanguages, UnsupportedLanguageError } from './tts.js';
 
 const ENGINE = (process.env.STT_ENGINE ?? 'chirp').toLowerCase();
 const PORT = Number(process.env.PORT ?? 8080);
@@ -198,6 +198,8 @@ app.post('/transcribe', async (req, res) => {
 
 // ── text to speech ───────────────────────────────────────────────────────────
 
+app.get('/tts-languages', (_req, res) => res.json({ languages: installedLanguages() }));
+
 app.get('/voices', async (req, res) => {
   try {
     res.json({ voices: await listVoices(req.query.language ?? 'en'),
@@ -217,6 +219,10 @@ app.post('/speak', express.json({ limit: '256kb' }), async (req, res) => {
     res.setHeader('X-TTS-Engine', engine);
     res.send(audio);
   } catch (err) {
+    if (err instanceof UnsupportedLanguageError) {
+      // A missing voice is a bad request, not an upstream fault.
+      return res.status(422).json({ error: err.message, available: err.available });
+    }
     console.error('speak failed:', err.message);
     res.status(502).json({ error: err.message });
   }
@@ -240,6 +246,9 @@ app.post('/speak/stream', express.json({ limit: '256kb' }), async (req, res) => 
     }
     res.end();
   } catch (err) {
+    if (err instanceof UnsupportedLanguageError && !res.headersSent) {
+      return res.status(422).json({ error: err.message, available: err.available });
+    }
     console.error('speak/stream failed:', err.message);
     if (!res.headersSent) res.status(502).json({ error: err.message });
     else res.end();

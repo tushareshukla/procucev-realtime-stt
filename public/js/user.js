@@ -1,34 +1,54 @@
 /**
  * Who is using the app.
  *
- * Asked once and remembered in localStorage, so the name survives reloads
- * without a login. It is sent with every saved item and used to scope the
- * history, so two people on the same deployment do not see each other's work.
+ * Identity lives in a server-side session keyed by an httpOnly cookie, not in
+ * browser storage: the page cannot read or forge it, and the server decides
+ * whose history to return. The name itself is durable because it is written on
+ * every row the user creates, so losing a session costs a re-prompt, not data.
  */
-const KEY = 'procucev.userName';
+let current = '';
 
 export function getUser() {
-  try {
-    return localStorage.getItem(KEY) || '';
-  } catch {
-    return '';   // private browsing, storage disabled
-  }
+  return current;
 }
 
-export function setUser(name) {
+/** Ask the server who we are, if anyone. */
+export async function loadUser() {
+  try {
+    const res = await fetch('/api/session', { credentials: 'same-origin' });
+    if (!res.ok) return '';
+    current = (await res.json()).userName || '';
+  } catch {
+    current = '';
+  }
+  return current;
+}
+
+export async function setUser(name) {
   const clean = String(name || '').trim().slice(0, 80);
   if (!clean) return '';
-  try { localStorage.setItem(KEY, clean); } catch { /* not fatal */ }
-  return clean;
+  const res = await fetch('/api/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ name: clean }),
+  });
+  if (!res.ok) throw new Error(`could not start session (${res.status})`);
+  current = (await res.json()).userName || clean;
+  return current;
 }
 
-export function clearUser() {
-  try { localStorage.removeItem(KEY); } catch { /* not fatal */ }
-}
-
-/** Resolves once a name is known — showing the prompt only if needed. */
-export function ensureUser({ onPrompt }) {
-  const existing = getUser();
-  if (existing) return Promise.resolve(existing);
-  return new Promise((resolve) => onPrompt((name) => resolve(setUser(name))));
+/** Resolves once a name is known, prompting only when the server has none. */
+export async function ensureUser({ onPrompt }) {
+  const existing = await loadUser();
+  if (existing) return existing;
+  return new Promise((resolve) => {
+    onPrompt(async (name) => {
+      try {
+        resolve(await setUser(name));
+      } catch {
+        resolve('');
+      }
+    });
+  });
 }

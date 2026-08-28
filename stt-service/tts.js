@@ -48,12 +48,14 @@ export async function listVoices(language) {
     }));
   }
   if (!fs.existsSync(PIPER_VOICE_DIR)) return [];
+  const want = String(language || '').toLowerCase().slice(0, 2);
   return fs.readdirSync(PIPER_VOICE_DIR)
     .filter((f) => f.endsWith('.onnx'))
-    .map((f) => {
-      const id = f.replace(/\.onnx$/, '');
-      return { id, name: id, language: id.split('_')[0], engine: 'piper' };
-    });
+    .map((f) => f.replace(/\.onnx$/, ''))
+    // Only voices for the requested language. Listing every installed voice
+    // made the UI offer Hindi for Bengali, which then failed at synthesis.
+    .filter((id) => id.toLowerCase().startsWith(want))
+    .map((id) => ({ id, name: id, language: id.split('_')[0], engine: 'piper' }));
 }
 
 async function speakKokoro(text, voice, speed) {
@@ -160,10 +162,31 @@ function splitSentences(text) {
     .filter(Boolean);
 }
 
+/** Thrown when a language has no installed voice, so callers can answer 4xx. */
+export class UnsupportedLanguageError extends Error {
+  constructor(language, available) {
+    super(`no text-to-speech voice installed for "${language}"`);
+    this.name = 'UnsupportedLanguageError';
+    this.language = language;
+    this.available = available;
+  }
+}
+
+export function installedLanguages() {
+  const langs = new Set(['en']);   // Kokoro
+  if (fs.existsSync(PIPER_VOICE_DIR)) {
+    for (const f of fs.readdirSync(PIPER_VOICE_DIR)) {
+      if (f.endsWith('.onnx')) langs.add(f.slice(0, 2).toLowerCase());
+    }
+  }
+  return [...langs].sort();
+}
+
 function defaultPiperVoice(language) {
   const lang = String(language).toLowerCase().slice(0, 2);
-  if (!fs.existsSync(PIPER_VOICE_DIR)) return `${lang}_IN`;
-  const match = fs.readdirSync(PIPER_VOICE_DIR)
-    .filter((f) => f.endsWith('.onnx') && f.toLowerCase().startsWith(lang));
-  return match.length ? match[0].replace(/\.onnx$/, '') : `${lang}_IN`;
+  const match = fs.existsSync(PIPER_VOICE_DIR)
+    ? fs.readdirSync(PIPER_VOICE_DIR).filter((f) => f.endsWith('.onnx') && f.toLowerCase().startsWith(lang))
+    : [];
+  if (!match.length) throw new UnsupportedLanguageError(language, installedLanguages());
+  return match[0].replace(/\.onnx$/, '');
 }

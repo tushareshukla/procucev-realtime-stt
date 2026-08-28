@@ -30,6 +30,52 @@ describe('DOM contract between app.js and index.html', () => {
     assert.match(html, /<script type="module"/);
   });
 
+  // Regression: an edit sliced out showRecording() while leaving its call site
+  // intact. The module threw at runtime and the whole UI went dead. Nothing in
+  // the suite noticed, because a missing function is not a syntax error.
+  test('every function app.js calls is defined or imported', () => {
+    // Comments and string literals mention names that are never called; strip
+    // them so prose does not register as code.
+    const code = app
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+      .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+      .replace(/`(?:[^`\\]|\\.)*`/g, '``');
+
+    const declared = new Set([
+      ...[...code.matchAll(/function\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+      ...[...code.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g)].map((m) => m[1]),
+      ...[...app.matchAll(/import\s*\{([^}]+)\}/g)]
+        .flatMap((m) => m[1].split(',').map((x) => x.trim().split(/\s+as\s+/).pop())),
+      // Parameters are in scope wherever they are used.
+      ...[...code.matchAll(/\(([^()]*)\)\s*=>/g)]
+        .flatMap((m) => m[1].split(',').map((x) => x.trim().replace(/[={].*$/, '').trim()))
+        .filter(Boolean),
+      ...[...code.matchAll(/function[^(]*\(([^()]*)\)/g)]
+        .flatMap((m) => m[1].split(',').map((x) => x.trim().replace(/[={].*$/, '').trim()))
+        .filter(Boolean),
+    ]);
+
+    const BUILTINS = new Set([
+      'if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'await', 'function',
+      'Promise', 'Array', 'Object', 'String', 'Number', 'Boolean', 'Math', 'JSON', 'Date',
+      'Error', 'Set', 'Map', 'Blob', 'File', 'FileReader', 'Audio', 'AudioContext',
+      'WebSocket', 'URL', 'fetch', 'setTimeout', 'setInterval', 'clearTimeout',
+      'requestAnimationFrame', 'cancelAnimationFrame', 'addEventListener', 'parseInt',
+      'parseFloat', 'isNaN', 'console', 'document', 'window', 'navigator', 'localStorage',
+      'Int16Array', 'Float32Array', 'Uint8Array', 'DataView', 'ArrayBuffer', 'MouseEvent',
+      'Event', 'CustomEvent', 'TextDecoder', 'TextEncoder', 'structuredClone', 'queueMicrotask',
+      'getComputedStyle', 'async', 'else', 'try', 'do', 'new', 'delete', 'void', 'yield',
+    ]);
+
+    const called = new Set(
+      [...code.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]),
+    );
+
+    const missing = [...called].filter((n) => !declared.has(n) && !BUILTINS.has(n));
+    assert.deepEqual(missing, [], `app.js calls undefined functions: ${missing.join(', ')}`);
+  });
+
   test('asset URLs carry a cache-busting placeholder', () => {
     assert.match(html, /app\.js\?v=__BUILD__/);
     for (const m of app.matchAll(/from '\.\/js\/([^']+)'/g)) {

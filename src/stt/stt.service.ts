@@ -48,6 +48,28 @@ export class SttService implements OnModuleInit {
   }
 
   /**
+   * Transcribe a complete WAV recording (as opposed to a streaming window).
+   * Strips the RIFF header and forwards the PCM the service expects.
+   */
+  async transcribeWav(wav: Buffer, language: string): Promise<SttResult> {
+    // Locate the data chunk rather than assuming a 44-byte header: browsers
+    // and encoders insert optional chunks before it.
+    let offset = 12;
+    let dataStart = 44;
+    while (offset + 8 <= wav.length) {
+      const id = wav.toString('ascii', offset, offset + 4);
+      const size = wav.readUInt32LE(offset + 4);
+      if (id === 'data') { dataStart = offset + 8; break; }
+      offset += 8 + size + (size % 2);
+    }
+
+    const pcm = wav.subarray(dataStart);
+    const audio = new Float32Array(pcm.length / 2);
+    for (let i = 0; i < audio.length; i++) audio[i] = pcm.readInt16LE(i * 2) / 32768;
+    return this.transcribe(audio, language);
+  }
+
+  /**
    * Live upstream check. Uses POST /transcribe with a 2-byte body rather than
    * a health path: infrastructure in front of Cloud Run intercepts /healthz on
    * some network paths, and this exercises the real code path anyway.

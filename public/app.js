@@ -315,6 +315,89 @@ function stopSpeaking(btn) {
   if (btn) { btn.classList.remove('on'); btn.textContent = '▶'; }
 }
 
+
+// ── finished recording ───────────────────────────────────────────────────────
+// The recording appears as soon as you stop, so you can hear it before
+// committing. "Generate transcript" is what turns it into a saved entry.
+let pending = null;
+
+function showRecording(blob) {
+  const holder = $('lastClip');
+  if (!holder) return;
+  holder.innerHTML = '';
+  holder.className = 'clip';
+
+  const label = document.createElement('div');
+  label.className = 'clip-meta';
+  label.textContent = 'Your recording';
+
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.src = URL.createObjectURL(blob);
+
+  holder.append(label, audio);
+  $('generate').hidden = false;
+  $('discard').hidden = false;
+}
+
+function clearPending() {
+  pending = null;
+  $('lastClip').innerHTML = '';
+  $('lastClip').className = '';
+  $('live').innerHTML = '<span class="ph">Press Record and start speaking.</span>';
+  $('generate').hidden = true;
+  $('discard').hidden = true;
+}
+
+const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1]);
+  r.onerror = reject;
+  r.readAsDataURL(blob);
+});
+
+$('discard').onclick = clearPending;
+
+$('generate').onclick = async () => {
+  if (!pending?.blob) return;
+  const btn = $('generate');
+  btn.disabled = true;
+  btn.textContent = 'Transcribing…';
+  try {
+    const audioBase64 = await blobToBase64(pending.blob);
+    const language = $('sttLang').value;
+
+    // Prefer what streaming already produced; fall back to transcribing the
+    // finished recording so this still works if the stream returned nothing.
+    let text = (pending.text || '').trim();
+    if (!text) {
+      const result = await api.transcribeRecording({ audioBase64, language });
+      text = (result.text || '').trim();
+    }
+    if (!text) {
+      $('hint').textContent = 'No speech was recognised in that recording.';
+      return;
+    }
+
+    await api.createTranscription({
+      text,
+      language,
+      durationS: pending.durationS || 0,
+      sessionId: pending.sessionId,
+      kind: 'stt',
+      audioBase64,
+    });
+    clearPending();
+    $('hint').textContent = 'Saved below.';
+    await load();
+  } catch (err) {
+    $('hint').textContent = `Could not generate: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate transcript';
+  }
+};
+
 // ── history + CRUD ───────────────────────────────────────────────────────────
 let items = [];
 
@@ -508,7 +591,6 @@ async function persistGenerated(blob, text) {
       language: getLanguage(),
       durationS: 0,
       sessionId: 'tts',
-      userName: getUser(),
       kind: 'tts',
       audioBase64: await blobToBase64(blob),
     });

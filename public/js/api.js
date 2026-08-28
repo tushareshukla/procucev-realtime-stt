@@ -1,14 +1,22 @@
 /** Thin REST client. Every network call to our own backend lives here. */
 
 async function json(url, options) {
-  const res = await fetch(url, options);
+  // Same-origin credentials so the session cookie travels with every call.
+  const res = await fetch(url, { credentials: 'same-origin', ...options });
   if (!res.ok) throw new Error(`${options?.method ?? 'GET'} ${url} → ${res.status}`);
   return res.status === 204 ? null : res.json();
 }
 
 export const api = {
-  listTranscriptions: (user) =>
-    json(`/api/transcriptions${user ? `?user=${encodeURIComponent(user)}` : ''}`),
+  // No user parameter: the server resolves identity from the session cookie,
+  // so a client cannot request someone else's history.
+  listTranscriptions: () => json('/api/transcriptions'),
+  transcribeRecording: (body) =>
+    json('/api/transcriptions/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   createTranscription: (body) =>
     json('/api/transcriptions', {
       method: 'POST',

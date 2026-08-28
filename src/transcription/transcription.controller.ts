@@ -1,14 +1,27 @@
 import {
-  Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Put, Query, Res,
+  Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Put, Query, Req, Res,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { IsIn, IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
+import { SESSION_COOKIE } from '../session/session.controller';
+import { SessionService } from '../session/session.service';
+import { SttService } from '../stt/stt.service';
 import { TranscriptionService } from './transcription.service';
 
 class UpdateTranscriptionDto {
   @IsString()
   @MinLength(1)
   text: string;
+}
+
+class TranscribeDto {
+  /** Base64 WAV, 16kHz mono as captured by the browser. */
+  @IsString()
+  @MinLength(1)
+  audioBase64: string;
+
+  @IsOptional() @IsString()
+  language?: string;
 }
 
 class CreateTranscriptionDto {
@@ -37,22 +50,49 @@ class CreateTranscriptionDto {
 
 @Controller('api/transcriptions')
 export class TranscriptionController {
-  constructor(private readonly service: TranscriptionService) {}
+  constructor(
+    private readonly service: TranscriptionService,
+    private readonly stt: SttService,
+    private readonly sessions: SessionService,
+  ) {}
+
+  /** The signed-in name, taken from the session rather than trusted from the body. */
+  private async userOf(req: Request): Promise<string> {
+    return (await this.sessions.resolve(
+      SessionService.readCookie(req.headers.cookie, SESSION_COOKIE),
+    )) ?? '';
+  }
 
   @Get()
-  findAll(@Query('limit') limit?: string, @Query('user') user?: string) {
-    return this.service.findAll(limit ? parseInt(limit, 10) : 100, user || undefined);
+  async findAll(@Req() req: Request, @Query('limit') limit?: string) {
+    // Scoped server-side: a client cannot ask for someone else's history.
+    // With no session there is no history to show — returning everything would
+    // leak every user's recordings to an anonymous visitor.
+    const user = await this.userOf(req);
+    if (!user) return [];
+    return this.service.findAll(limit ? parseInt(limit, 10) : 100, user);
+  }
+
+  /**
+   * Transcribe a finished recording. The live stream already produces text
+   * while speaking, but this lets the client ask for a transcript on demand —
+   * and recover if streaming returned nothing.
+   */
+  @Post('transcribe')
+  async transcribe(@Body() dto: TranscribeDto) {
+    const wav = Buffer.from(dto.audioBase64, 'base64');
+    return this.stt.transcribeWav(wav, dto.language ?? 'en');
   }
 
   @Post()
-  create(@Body() dto: CreateTranscriptionDto) {
+  async create(@Body() dto: CreateTranscriptionDto, @Req() req: Request) {
     return this.service.create({
       sessionId: dto.sessionId ?? 'manual',
       text: dto.text,
       language: dto.language ?? '',
       durationS: dto.durationS ?? 0,
       confidence: 1,
-      userName: (dto.userName ?? '').slice(0, 80),
+      userName: await this.userOf(req),
       kind: dto.kind ?? 'stt',
       audio: dto.audioBase64,
       hasAudio: Boolean(dto.audioBase64),

@@ -5,6 +5,9 @@ import { join } from 'path';
 
 import { HealthController } from './health.controller';
 import { IndexController } from './index.controller';
+import { Session } from './session/session.entity';
+import { SessionController } from './session/session.controller';
+import { SessionService } from './session/session.service';
 import { MastraController } from './mastra/mastra.controller';
 import { MastraService } from './mastra/mastra.service';
 import { SttService } from './stt/stt.service';
@@ -30,18 +33,18 @@ const usePostgres = databaseUrl.startsWith('postgres');
         ? {
             type: 'postgres',
             url: databaseUrl,
-            entities: [Transcription],
+            entities: [Transcription, Session],
             synchronize: true,
             ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
           }
         : {
             type: 'better-sqlite3',
             database: process.env.SQLITE_PATH ?? './transcriptions.db',
-            entities: [Transcription],
+            entities: [Transcription, Session],
             synchronize: true,
           },
     ),
-    TypeOrmModule.forFeature([Transcription]),
+    TypeOrmModule.forFeature([Transcription, Session]),
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'public'),
       serveStaticOptions: {
@@ -56,7 +59,7 @@ const usePostgres = databaseUrl.startsWith('postgres');
       },
     }),
   ],
-  controllers: [IndexController, HealthController, TranscriptionController, TtsController, MastraController],
-  providers: [TranscriptionService, SttService, TtsService, TranscriptionGateway, MastraService],
+  controllers: [IndexController, HealthController, SessionController, TranscriptionController, TtsController, MastraController],
+  providers: [SessionService, TranscriptionService, SttService, TtsService, TranscriptionGateway, MastraService],
 })
 export class AppModule {}
